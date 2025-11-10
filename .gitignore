@@ -26,6 +26,7 @@
 # Virtual environments
 venv/
 dev-venv/
+uvenv/
 env/
 ENV/
 .venv
