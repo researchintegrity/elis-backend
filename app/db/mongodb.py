@@ -70,6 +70,33 @@ def get_users_collection():
     return collection
 
 
+def get_documents_collection():
+    """Get documents collection with indexes for PDF uploads"""
+    collection = db_connection.get_collection("documents")
+    
+    # Create indexes for better performance
+    collection.create_index("user_id")
+    collection.create_index("uploaded_date")
+    collection.create_index([("user_id", 1), ("uploaded_date", -1)])
+    
+    return collection
+
+
+def get_images_collection():
+    """Get images collection with indexes for extracted/uploaded images"""
+    collection = db_connection.get_collection("images")
+    
+    # Create indexes for better performance
+    collection.create_index("user_id")
+    collection.create_index("document_id")
+    collection.create_index("uploaded_date")
+    collection.create_index("source_type")
+    collection.create_index([("user_id", 1), ("source_type", 1)])
+    collection.create_index([("document_id", 1), ("source_type", 1)])
+    
+    return collection
+
+
 def get_database():
     """Get database instance"""
     return db_connection.get_database()

@@ -1,0 +1,425 @@
+"""
+File storage utilities for document and image upload handling
+"""
+import shutil
+from pathlib import Path
+from typing import Tuple, Optional
+from datetime import datetime
+
+# Base upload directory
+UPLOAD_DIR = Path("uploads")
+
+# Import quota configuration
+from app.config.storage_quota import MAX_PDF_FILE_SIZE, MAX_IMAGE_FILE_SIZE, DEFAULT_USER_STORAGE_QUOTA
+
+# File size limits (in bytes) - imported from config
+MAX_PDF_SIZE = MAX_PDF_FILE_SIZE  # 50MB
+MAX_IMAGE_SIZE = MAX_IMAGE_FILE_SIZE  # 10MB
+
+# Allowed file extensions
+ALLOWED_PDF_EXTENSIONS = {".pdf"}
+ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+
+
+def ensure_directories_exist():
+    """Ensure all required directories exist"""
+    UPLOAD_DIR.mkdir(exist_ok=True)
+
+
+def get_user_upload_path(user_id: str, subfolder: str = None) -> Path:
+    """
+    Get the upload path for a specific user
+    
+    Args:
+        user_id: User ID
+        subfolder: Optional subfolder (e.g., 'pdfs', 'images')
+        
+    Returns:
+        Path object for user's upload directory
+    """
+    user_path = UPLOAD_DIR / user_id
+    
+    if subfolder:
+        user_path = user_path / subfolder
+    
+    user_path.mkdir(parents=True, exist_ok=True)
+    return user_path
+
+
+def get_extraction_output_path(user_id: str, doc_id: str) -> Path:
+    """
+    Get the path where extracted images should be saved for a document
+    
+    Args:
+        user_id: User ID
+        doc_id: Document ID
+        
+    Returns:
+        Path object for extracted images directory
+    """
+    extraction_path = UPLOAD_DIR / user_id / "images" / "extracted" / doc_id
+    extraction_path.mkdir(parents=True, exist_ok=True)
+    return extraction_path
+
+
+def generate_unique_filename(original_filename: str, prefix: str = None) -> str:
+    """
+    Generate a unique filename with timestamp and optional prefix
+    
+    Args:
+        original_filename: Original filename
+        prefix: Optional prefix (e.g., document ID)
+        
+    Returns:
+        Unique filename with extension preserved
+    """
+    timestamp = int(datetime.now().timestamp())
+    file_ext = Path(original_filename).suffix.lower()
+    base_name = Path(original_filename).stem
+    
+    if prefix:
+        filename = f"{prefix}_{timestamp}_{base_name}{file_ext}"
+    else:
+        filename = f"{timestamp}_{base_name}{file_ext}"
+    
+    return filename
+
+
+def validate_pdf(filename: str, file_size: int) -> Tuple[bool, Optional[str]]:
+    """
+    Validate a PDF file
+    
+    Args:
+        filename: Filename to validate
+        file_size: File size in bytes
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    # Check extension
+    file_ext = Path(filename).suffix.lower()
+    if file_ext not in ALLOWED_PDF_EXTENSIONS:
+        return False, f"Invalid file type: {file_ext}. Only PDF files are allowed."
+    
+    # Check file size
+    if file_size > MAX_PDF_SIZE:
+        size_mb = MAX_PDF_SIZE / (1024 * 1024)
+        return False, f"File too large. Maximum size is {size_mb}MB."
+    
+    if file_size == 0:
+        return False, "File is empty."
+    
+    return True, None
+
+
+def validate_image(filename: str, file_size: int) -> Tuple[bool, Optional[str]]:
+    """
+    Validate an image file
+    
+    Args:
+        filename: Filename to validate
+        file_size: File size in bytes
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    # Check extension
+    file_ext = Path(filename).suffix.lower()
+    if file_ext not in ALLOWED_IMAGE_EXTENSIONS:
+        allowed = ", ".join(ALLOWED_IMAGE_EXTENSIONS)
+        return False, f"Invalid file type: {file_ext}. Allowed types: {allowed}."
+    
+    # Check file size
+    if file_size > MAX_IMAGE_SIZE:
+        size_mb = MAX_IMAGE_SIZE / (1024 * 1024)
+        return False, f"File too large. Maximum size is {size_mb}MB."
+    
+    if file_size == 0:
+        return False, "File is empty."
+    
+    return True, None
+
+
+def save_pdf_file(user_id: str, file_content: bytes, original_filename: str) -> Tuple[str, int]:
+    """
+    Save a PDF file to disk
+    
+    Args:
+        user_id: User ID
+        file_content: File content as bytes
+        original_filename: Original filename
+        
+    Returns:
+        Tuple of (file_path, file_size)
+        
+    Raises:
+        IOError: If file cannot be saved
+    """
+    # Generate unique filename
+    unique_filename = generate_unique_filename(original_filename)
+    
+    # Get user PDF directory
+    pdf_dir = get_user_upload_path(user_id, "pdfs")
+    
+    # Full file path
+    file_path = pdf_dir / unique_filename
+    
+    # Save file
+    try:
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+        
+        file_size = len(file_content)
+        return str(file_path), file_size
+    
+    except Exception as e:
+        raise IOError(f"Failed to save PDF file: {str(e)}")
+
+
+def save_image_file(
+    user_id: str,
+    file_content: bytes,
+    original_filename: str,
+    doc_id: Optional[str] = None
+) -> Tuple[str, int]:
+    """
+    Save an image file to disk
+    
+    Args:
+        user_id: User ID
+        file_content: File content as bytes
+        original_filename: Original filename
+        doc_id: Optional document ID (for extracted images)
+        
+    Returns:
+        Tuple of (file_path, file_size)
+        
+    Raises:
+        IOError: If file cannot be saved
+    """
+    # Determine if extracted or uploaded
+    if doc_id:
+        # Extracted image - save to extracted/{doc_id}/ directory
+        image_dir = get_extraction_output_path(user_id, doc_id)
+        unique_filename = generate_unique_filename(original_filename, prefix="extracted")
+    else:
+        # User-uploaded image
+        image_dir = get_user_upload_path(user_id, "images/uploaded")
+        unique_filename = generate_unique_filename(original_filename)
+    
+    # Full file path
+    file_path = image_dir / unique_filename
+    
+    # Save file
+    try:
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+        
+        file_size = len(file_content)
+        return str(file_path), file_size
+    
+    except Exception as e:
+        raise IOError(f"Failed to save image file: {str(e)}")
+
+
+def delete_file(file_path: str) -> Tuple[bool, Optional[str]]:
+    """
+    Delete a file from disk
+    
+    Args:
+        file_path: Path to file
+        
+    Returns:
+        Tuple of (success, error_message)
+    """
+    try:
+        path = Path(file_path)
+        if path.exists():
+            path.unlink()
+            return True, None
+        else:
+            return False, "File not found."
+    except Exception as e:
+        return False, f"Failed to delete file: {str(e)}"
+
+
+def delete_directory(dir_path: str) -> Tuple[bool, Optional[str]]:
+    """
+    Delete a directory and all its contents
+    
+    Args:
+        dir_path: Path to directory
+        
+    Returns:
+        Tuple of (success, error_message)
+    """
+    try:
+        path = Path(dir_path)
+        if path.exists() and path.is_dir():
+            shutil.rmtree(path)
+            return True, None
+        else:
+            return False, "Directory not found."
+    except Exception as e:
+        return False, f"Failed to delete directory: {str(e)}"
+
+
+# ============================================================================
+# Storage Quota Management
+# ============================================================================
+
+def get_user_storage_usage(user_id: str) -> int:
+    """
+    Calculate total storage used by a user across all files
+    
+    Recursively sums the size of all files in the user's upload directory
+    (PDFs, uploaded images, and extracted images)
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Total storage used in bytes
+    """
+    user_dir = UPLOAD_DIR / user_id
+    
+    if not user_dir.exists():
+        return 0
+    
+    total_size = 0
+    try:
+        # Walk through all files in user directory and sum sizes
+        for file_path in user_dir.rglob("*"):
+            if file_path.is_file():
+                total_size += file_path.stat().st_size
+    except Exception as e:
+        # Log but don't raise - return what we can
+        print(f"Warning: Error calculating storage for user {user_id}: {str(e)}")
+    
+    return total_size
+
+
+def check_storage_quota(user_id: str, file_size: int, quota_bytes: int = None) -> Tuple[bool, Optional[str]]:
+    """
+    Check if adding a file would exceed storage quota
+    
+    Args:
+        user_id: User ID
+        file_size: Size of file being uploaded in bytes
+        quota_bytes: User's storage quota (defaults to DEFAULT_USER_STORAGE_QUOTA)
+        
+    Returns:
+        Tuple of (quota_available, error_message)
+        - quota_available: True if file can be uploaded, False otherwise
+        - error_message: Description of quota issue or None if OK
+    """
+    if quota_bytes is None:
+        quota_bytes = DEFAULT_USER_STORAGE_QUOTA
+    
+    current_usage = get_user_storage_usage(user_id)
+    remaining = quota_bytes - current_usage
+    
+    if remaining < file_size:
+        from app.config.storage_quota import format_bytes
+        return False, (
+            f"Storage quota exceeded. File size: {format_bytes(file_size)}, "
+            f"Remaining quota: {format_bytes(remaining)}. "
+            f"Total quota: {format_bytes(quota_bytes)}"
+        )
+    
+    return True, None
+
+
+def get_quota_status(user_id: str, quota_bytes: int = None) -> dict:
+    """
+    Get detailed storage quota status for a user
+    
+    Args:
+        user_id: User ID
+        quota_bytes: User's storage quota (defaults to DEFAULT_USER_STORAGE_QUOTA)
+        
+    Returns:
+        Dictionary with quota information:
+        {
+            "used_bytes": int,
+            "quota_bytes": int,
+            "remaining_bytes": int,
+            "used_percentage": float
+        }
+    """
+    if quota_bytes is None:
+        quota_bytes = DEFAULT_USER_STORAGE_QUOTA
+    
+    used_bytes = get_user_storage_usage(user_id)
+    remaining_bytes = max(0, quota_bytes - used_bytes)
+    used_percentage = (used_bytes / quota_bytes * 100) if quota_bytes > 0 else 0
+    
+    return {
+        "used_bytes": used_bytes,
+        "quota_bytes": quota_bytes,
+        "remaining_bytes": remaining_bytes,
+        "used_percentage": round(used_percentage, 2)
+    }
+
+
+# ============================================================================
+# Figure Extraction Placeholder
+# ============================================================================
+
+def figure_extraction_hook(
+    doc_id: str,
+    user_id: str,
+    pdf_file_path: str
+) -> Tuple[int, list[str]]:
+    """
+    Placeholder function for figure extraction from PDF
+    
+    This function will be called automatically after a PDF is uploaded.
+    It should extract figures from the PDF and save them to:
+    /uploads/{user_id}/images/extracted/{doc_id}/
+    
+    Args:
+        doc_id: Document ID
+        user_id: User ID
+        pdf_file_path: Path to the PDF file
+        
+    Returns:
+        Tuple of (extracted_image_count, extraction_errors)
+        - extracted_image_count: Number of figures successfully extracted
+        - extraction_errors: List of error messages encountered during extraction
+        
+    Example implementation:
+        - Use PyPDF2 or pdfplumber to read PDF
+        - Extract images using pdf2image or PIL
+        - Save images to extraction output path
+        - Return count and any errors
+        
+    Raises:
+        Should NOT raise exceptions. Instead, return errors in the list.
+    """
+    # TODO: Implement figure extraction logic
+    # For now, return placeholder values
+    
+    try:
+        # This is where you would:
+        # 1. Open the PDF file
+        # 2. Extract figures/images
+        # 3. Save to get_extraction_output_path(user_id, doc_id)
+        # 4. Track any errors
+        # 5. Return (image_count, errors_list)
+        
+        # Placeholder implementation
+        extraction_errors = []
+        extracted_image_count = 0
+        
+        # TODO: Replace with actual extraction logic
+        
+        return extracted_image_count, extraction_errors
+    
+    except Exception as e:
+        # Don't raise - return as error in list
+        return 0, [f"Extraction failed: {str(e)}"]
+
+
+# Initialize directories on module load
+ensure_directories_exist()

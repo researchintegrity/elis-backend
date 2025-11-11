@@ -25,7 +25,7 @@ async def register(user_data: UserRegister) -> dict:
     
     - **username**: Unique username (3-50 characters)
     - **email**: Valid email address
-    - **password**: Password (minimum 8 characters)
+    - **password**: Password (minimum 4 characters)
     - **full_name**: Optional full name
     """
     collection = get_users_collection()
