@@ -148,6 +148,237 @@
 
         .btn-logout:hover {
             background: #dd6b20;
+        }
+
+        .btn-documents {
+            background: #4299e1;
+            color: white;
+        }
+
+        .btn-documents:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(66, 153, 225, 0.4);
+        }
+
+        .dashboard {
+            display: none;
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .dashboard.active {
+            display: block;
+        }
+
+        .dashboard h2 {
+            color: #333;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .upload-section {
+            background: #f7fafc;
+            border: 2px dashed #cbd5e0;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            margin: 20px 0;
+            transition: all 0.3s;
+        }
+
+        .upload-section:hover {
+            border-color: #667eea;
+            background: #edf2f7;
+        }
+
+        .upload-section.dragover {
+            border-color: #667eea;
+            background: #e6fffa;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-input {
+            display: none;
+        }
+
+        .upload-label {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .upload-label:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .file-list {
+            margin-top: 30px;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f7fafc;
+            margin-bottom: 8px;
+            border-radius: 4px;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            color: #2d3748;
+        }
+
+        .file-size {
+            font-size: 12px;
+            color: #718096;
+            margin-top: 4px;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-download {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-download:hover {
+            background: #38a169;
+        }
+
+        .btn-remove {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-remove:hover {
+            background: #e53e3e;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .status-pending {
+            background: #feebc8;
+            color: #7c2d12;
+        }
+
+        .status-completed {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .status-failed {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .alert.show {
+            display: block;
+        }
+
+        .alert-success {
+            background: #c6f6d5;
+            color: #22543d;
+            border: 1px solid #9ae6b4;
+        }
+
+        .alert-error {
+            background: #fed7d7;
+            color: #742a2a;
+            border: 1px solid #fc8181;
+        }
+
+        .alert-info {
+            background: #bee3f8;
+            color: #2c5aa0;
+            border: 1px solid #90cdf4;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .tab-btn {
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            color: #718096;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(237, 137, 54, 0.4);
         }
@@ -378,8 +609,8 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="registerPassword" placeholder="Min 8 characters">
+                    <label>Password:</label>
+                    <input type="password" id="registerPassword" placeholder="Min 4 characters">
                 </div>
 
                 <button class="btn-register" onclick="register()">Register</button>
