@@ -4,11 +4,6 @@ Storage Quota Configuration
 This module defines storage quota limits for the ELIS system.
 All limits are in bytes. Modify these values to adjust quotas globally.
 
-Quota Tiers:
-- FREE_TIER: Default user quota
-- PREMIUM_TIER: For premium users (future)
-- ENTERPRISE_TIER: For enterprise users (future)
-
 To modify quotas:
 1. Change the constant values below
 2. No code changes needed - the system uses these constants everywhere

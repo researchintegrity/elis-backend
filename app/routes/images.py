@@ -16,7 +16,8 @@ from app.utils.file_storage import (
     save_image_file,
     delete_file,
     check_storage_quota,
-    get_quota_status
+    get_quota_status,
+    update_user_storage_in_db
 )
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
 
@@ -131,6 +132,9 @@ async def upload_image(
         quota_status = get_quota_status(user_id_str, user_quota)
         img_record["user_storage_used"] = quota_status["used_bytes"]
         img_record["user_storage_remaining"] = quota_status["remaining_bytes"]
+        
+        # Update user storage in database for easy access
+        update_user_storage_in_db(user_id_str)
         
         return ImageResponse(**img_record)
     
@@ -358,6 +362,9 @@ async def delete_image(
         
         # Delete image record from MongoDB
         images_col.delete_one({"_id": ObjectId(image_id)})
+        
+        # Update user storage in database
+        update_user_storage_in_db(str(current_user["_id"]))
     
     except Exception as e:
         raise HTTPException(

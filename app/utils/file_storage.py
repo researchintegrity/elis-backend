@@ -421,5 +421,47 @@ def figure_extraction_hook(
         return 0, [f"Extraction failed: {str(e)}"]
 
 
+# ============================================================================
+# User Storage Tracking
+# ============================================================================
+
+def update_user_storage_in_db(user_id: str) -> int:
+    """
+    Update the storage_used_bytes field in the users collection
+    
+    Calculates current storage usage and updates the user document
+    in MongoDB for easy access without recalculating each time.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        Updated storage usage in bytes
+    """
+    from app.db.mongodb import get_users_collection
+    from bson import ObjectId
+    
+    # Calculate current usage
+    current_usage = get_user_storage_usage(user_id)
+    
+    # Update user document
+    try:
+        users_col = get_users_collection()
+        users_col.update_one(
+            {"_id": ObjectId(user_id)},
+            {
+                "$set": {
+                    "storage_used_bytes": current_usage,
+                    "updated_at": __import__('datetime').datetime.utcnow()
+                }
+            }
+        )
+    except Exception as e:
+        # Log but don't raise - storage tracking should not block operations
+        print(f"Warning: Failed to update storage_used_bytes for user {user_id}: {str(e)}")
+    
+    return current_usage
+
+
 # Initialize directories on module load
 ensure_directories_exist()

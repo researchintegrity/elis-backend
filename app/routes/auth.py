@@ -48,6 +48,7 @@ async def register(user_data: UserRegister) -> dict:
         "hashed_password": hash_password(user_data.password),
         "full_name": user_data.full_name,
         "is_active": True,
+        "storage_used_bytes": 0,  # Initialize storage usage tracking
         "created_at": __import__('datetime').datetime.utcnow(),
         "updated_at": __import__('datetime').datetime.utcnow()
     }
