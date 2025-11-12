@@ -21,6 +21,7 @@ import uuid
 from app.main import app
 from app.db.mongodb import get_documents_collection, get_images_collection, db_connection
 from app.utils.file_storage import UPLOAD_DIR, delete_directory
+from app.config.storage_quota import MAX_IMAGE_FILE_SIZE, MAX_PDF_FILE_SIZE
 
 
 # ============================================================================
@@ -46,6 +47,7 @@ def test_user_token(client):
     """Register and login a test user, return auth token"""
     # Generate unique username for each test
     import uuid
+
     unique_id = str(uuid.uuid4())[:8]
     username = f"testuser_{unique_id}"
     email = f"testuser_{unique_id}@example.com"
@@ -259,7 +261,7 @@ class TestDocumentUpload:
         token, user_id = test_user_token
         
         # Create oversized content (exceeds 50MB limit)
-        oversized_content = b"%PDF-1.4\n" + (b"x" * (51 * 1024 * 1024))
+        oversized_content = b"%PDF-1.4\n" + (b"x" * (MAX_PDF_FILE_SIZE + 1))
         
         response = client.post(
             "/documents/upload",
@@ -534,7 +536,7 @@ class TestImageUpload:
         token, user_id = test_user_token
         
         # Create oversized content (exceeds 10MB limit)
-        oversized_content = b"\x89PNG\r\n\x1a\n" + (b"x" * (11 * 1024 * 1024))
+        oversized_content = b"\x89PNG\r\n\x1a\n" + (b"x" * (MAX_IMAGE_FILE_SIZE + 1))
         
         response = client.post(
             "/images/upload",
