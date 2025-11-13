@@ -100,6 +100,12 @@ htmlcov/
 workspace/
 extractions/
 
+# system modules
+system_modules/
+
+# dataset for testing
+datasets/
+
 # ============================================================================
 # OS SPECIFIC
 # ============================================================================
