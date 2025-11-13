@@ -58,9 +58,13 @@ def extract_images_with_docker(
             logger.error(error_msg)
             return 0, [error_msg]
         
+        # Convert to absolute paths for Docker
+        pdf_file_path = os.path.abspath(pdf_file_path)
+        
         # Get extraction output path
         from app.utils.file_storage import get_extraction_output_path
         output_dir = get_extraction_output_path(user_id, doc_id)
+        output_dir = os.path.abspath(output_dir)  # Convert to absolute path
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -69,19 +73,66 @@ def extract_images_with_docker(
         pdf_dir = os.path.dirname(pdf_file_path)
         pdf_filename = os.path.basename(pdf_file_path)
         
+        # Handle Docker running inside a container vs on the host:
+        # 
+        # In host environment (running tests locally):
+        #   - pdf_file_path will be relative like "workspace/user/pdfs/file.pdf"
+        #   - After abspath() it becomes: "/current/working/dir/workspace/user/pdfs/file.pdf"
+        #   - We pass this directly to Docker since Docker daemon is on same host
+        #
+        # In container environment (Celery worker in Docker):
+        #   - pdf_file_path will be like "/app/workspace/user/pdfs/file.pdf"
+        #   - Docker daemon is on the host, needs the actual host path
+        #   - We need to convert using WORKSPACE_PATH environment variable
+        
+        host_pdf_dir = pdf_dir
+        host_output_dir = output_dir
+        
+        # If path starts with /app/workspace, we're in the worker container
+        if pdf_dir.startswith("/app/workspace"):
+            # Get the host workspace path from environment variable set in docker-compose
+            workspace_path = os.getenv("WORKSPACE_PATH")
+            
+            if not workspace_path:
+                error_msg = "WORKSPACE_PATH environment variable not set"
+                logger.error(error_msg)
+                extraction_errors.append(error_msg)
+                return 0, extraction_errors
+            
+            # Convert: /app/workspace/user_id/pdfs/... → /host/path/workspace/user_id/pdfs/...
+            rel_path = pdf_dir[len("/app/workspace"):]  # Get relative path like /user_id/pdfs
+            host_pdf_dir = workspace_path + rel_path
+            
+            # Do the same for output directory
+            rel_output = output_dir[len("/app/workspace"):]
+            host_output_dir = workspace_path + rel_output
+            
+            logger.info(
+                f"Path conversion (worker to host):\n"
+                f"  Container path: {pdf_dir}\n"
+                f"  Host path: {host_pdf_dir}\n"
+                f"  WORKSPACE_PATH: {workspace_path}"
+            )
+        
         logger.info(
             f"Starting Docker extraction for doc_id={doc_id}\n"
-            f"  PDF: {pdf_file_path}\n"
-            f"  Input dir: {pdf_dir}\n"
-            f"  Output dir: {output_dir}"
+            f"  PDF (container): {pdf_file_path}\n"
+            f"  PDF mount src: {host_pdf_dir}\n"
+            f"  Output mount src: {host_output_dir}"
         )
         
-        # Build Docker command
+        # Note: We cannot validate host_pdf_dir exists in the worker container
+        # because the worker can only see /app/workspace, not the absolute host path
+        # Docker daemon on the host will validate the paths when mounting
+        # So we skip the validation and let Docker report errors if paths are wrong
+        
+        # Build Docker command with host paths
+        # These paths will be mounted by Docker daemon running on the host
         docker_command = [
             "docker", "run",
             "--rm",  # Remove container after execution
-            "-v", f"{pdf_dir}:/INPUT",  # Volume mount for PDF input
-            "-v", f"{output_dir}:/OUTPUT",  # Volume mount for extracted images
+            "-v", f"{host_pdf_dir}:/INPUT",  # Volume mount for PDF input
+            "-v", f"{host_output_dir}:/OUTPUT",  # Volume mount for extracted images
             "-e", f"INPUT_PATH=/INPUT/{pdf_filename}",  # Environment variable for input file
             "-e", "OUTPUT_PATH=/OUTPUT",  # Environment variable for output directory
             docker_image  # Docker image name
@@ -126,6 +177,18 @@ def extract_images_with_docker(
                 f"  Extracted images: {extracted_image_count}\n"
                 f"  Files: {extracted_files}"
             )
+            
+            # If no images extracted and no errors, might be a PDF with no images
+            if extracted_image_count == 0 and not extraction_errors:
+                # Check Docker output for clues
+                if result.stdout and "No images" in result.stdout:
+                    logger.info(f"Docker reported no images found in PDF")
+                    extraction_errors.append("PDF contains no extractable images")
+                elif result.stdout and "error" in result.stdout.lower():
+                    logger.warning(f"Docker output suggests error: {result.stdout}")
+                    extraction_errors.append(f"Docker warning: {result.stdout}")
+                else:
+                    logger.warning(f"No images extracted but no errors - PDF may have no images")
         else:
             error_msg = f"Output directory not created: {output_dir}"
             logger.warning(error_msg)
@@ -171,6 +234,11 @@ def extract_images_with_docker_compose(
     
     try:
         # Validate PDF file exists
+
+        # Convert to absolute paths for Docker
+        pdf_file_path = os.path.abspath(pdf_file_path)
+        
+
         if not os.path.exists(pdf_file_path):
             error_msg = f"PDF file not found: {pdf_file_path}"
             logger.error(error_msg)
@@ -179,6 +247,7 @@ def extract_images_with_docker_compose(
         # Get extraction output path
         from app.utils.file_storage import get_extraction_output_path
         output_dir = get_extraction_output_path(user_id, doc_id)
+        output_dir = os.path.abspath(output_dir)  # Convert to absolute path
         os.makedirs(output_dir, exist_ok=True)
         
         pdf_dir = os.path.dirname(pdf_file_path)

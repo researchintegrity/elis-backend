@@ -49,23 +49,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    logging:
+      driver: "none"
     networks:
       - elis_network
 
   # MongoDB Test Database (unauthenticated for local testing)
-  mongo_test:
-    image: mongo:6
-    ports:
-      - "27018:27017"
-    volumes:
-      - mongo_test_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - elis_network
+  # mongo_test:
+  #   image: mongo:6
+  #   ports:
+  #     - "27018:27017"
+  #   volumes:
+  #     - mongo_test_data:/data/db
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #   networks:
+  #     - elis_network
 
   # Celery Worker 1
   worker_1:
@@ -74,11 +76,13 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      WORKSPACE_PATH: ${WORKSPACE_PATH:-.}
     depends_on:
       - redis
       - mongo
     volumes:
       - ./workspace:/app/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker1@%h -c 1
     restart: unless-stopped
     networks:
@@ -91,11 +95,13 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      WORKSPACE_PATH: ${WORKSPACE_PATH:-.}
     depends_on:
       - redis
       - mongo
     volumes:
       - ./workspace:/app/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker2@%h -c 1
     restart: unless-stopped
     networks:
