@@ -78,7 +78,7 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: ${WORKSPACE_PATH:-.}
+      WORKSPACE_PATH: ${WORKSPACE_PATH}
     depends_on:
       - redis
       - mongo
@@ -97,7 +97,7 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: ${WORKSPACE_PATH:-.}
+      WORKSPACE_PATH: ${WORKSPACE_PATH}
     depends_on:
       - redis
       - mongo
