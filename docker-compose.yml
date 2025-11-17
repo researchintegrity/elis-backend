@@ -10,6 +10,8 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      JWT_SECRET: your-secret-key-here-change-this-in-production-to-a-strong-random-string
+      JWT_EXPIRATION_HOURS: 24
     depends_on:
       - mongo
       - redis
