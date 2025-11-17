@@ -103,6 +103,21 @@ def get_images_collection():
     return collection
 
 
+def get_annotations_collection():
+    """Get annotations collection with indexes for image annotations"""
+    collection = db_connection.get_collection("annotations")
+    
+    # Create indexes for better performance
+    collection.create_index("user_id")
+    collection.create_index("image_id")
+    collection.create_index("created_at")
+    collection.create_index([("user_id", 1), ("image_id", 1)])
+    collection.create_index([("image_id", 1), ("created_at", -1)])
+    
+    return collection
+
+
 def get_database():
     """Get database instance"""
     return db_connection.get_database()
+

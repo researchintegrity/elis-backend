@@ -10,11 +10,14 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_HOURS: 24
+      WORKSPACE_PATH: ${WORKSPACE_PATH}
     depends_on:
       - mongo
       - redis
     volumes:
-      - ./workspace:/app/workspace
+      - ${WORKSPACE_PATH}:/app/workspace
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - elis_network
@@ -36,7 +39,7 @@ services:
 
   # MongoDB Database (unauthenticated for local development)
   mongo:
-    image: mongo:6
+    image: mongo:7
     ports:
       - "27017:27017"
     # environment:
@@ -76,12 +79,13 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: ${WORKSPACE_PATH:-.}
+      WORKSPACE_PATH: ${WORKSPACE_PATH}
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
       - redis
       - mongo
     volumes:
-      - ./workspace:/app/workspace
+      - ${WORKSPACE_PATH}:/app/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker1@%h -c 1
     restart: unless-stopped
@@ -95,12 +99,13 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: ${WORKSPACE_PATH:-.}
+      WORKSPACE_PATH: ${WORKSPACE_PATH}
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
       - redis
       - mongo
     volumes:
-      - ./workspace:/app/workspace
+      - ${WORKSPACE_PATH}:/app/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker2@%h -c 1
     restart: unless-stopped

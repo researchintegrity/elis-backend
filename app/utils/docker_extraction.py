@@ -90,6 +90,16 @@ def extract_images_with_docker(
         pdf_dir = os.path.dirname(pdf_file_path)
         pdf_filename = os.path.basename(pdf_file_path)
         
+        logger.info(
+            f"Extraction starting for doc_id={doc_id}, user_id={user_id}\n"
+            f"  Original PDF path: {pdf_file_path}\n"
+            f"  PDF dir: {pdf_dir}\n"
+            f"  PDF filename: {pdf_filename}\n"
+            f"  Output dir: {output_dir}\n"
+            f"  is_container_path: {is_container_path(pdf_dir)}\n"
+            f"  WORKSPACE_PATH env: {os.getenv('WORKSPACE_PATH')}"
+        )
+        
         # Handle Docker running inside a container vs on the host:
         # 
         # In host environment (running tests locally):
@@ -106,9 +116,14 @@ def extract_images_with_docker(
         host_output_dir = output_dir
         
         # If path starts with /app/workspace, we're in the worker container
+        workspace_path = os.getenv("WORKSPACE_PATH")
+        container_path_len = get_container_path_length()
+        
+        logger.debug(f"Path analysis: container_path_len={container_path_len}, is_container={is_container_path(pdf_dir)}")
+        
         if is_container_path(pdf_dir):
-            # Get the host workspace path from environment variable set in docker-compose
-            workspace_path = os.getenv("WORKSPACE_PATH")
+            # We're running in the worker container, need to convert paths for Docker daemon on host
+            logger.info(f"Detected container environment. Converting paths for host Docker daemon")
             
             if not workspace_path:
                 error_msg = "WORKSPACE_PATH environment variable not set"
@@ -117,15 +132,31 @@ def extract_images_with_docker(
                 return 0, extraction_errors, []
             
             # Convert: /app/workspace/user_id/pdfs/... → /host/path/workspace/user_id/pdfs/...
-            rel_path = pdf_dir[get_container_path_length():]  # Get relative path like /user_id/pdfs
+            # Example: /app/workspace/abc123/pdfs/file.pdf
+            # Get relative path: abc123/pdfs
+            rel_path = pdf_dir[container_path_len:]  # Remove /app/workspace prefix
             host_pdf_dir = workspace_path + rel_path
             
             # Do the same for output directory
-            rel_output = output_dir[get_container_path_length():]
+            rel_output = output_dir[container_path_len:]
             host_output_dir = workspace_path + rel_output
+            
+            logger.debug(
+                f"Container path conversion:\n"
+                f"  Original PDF dir: {pdf_dir}\n"
+                f"  Relative path: {rel_path}\n"
+                f"  WORKSPACE_PATH: {workspace_path}\n"
+                f"  Host PDF dir: {host_pdf_dir}\n"
+                f"  Host output dir: {host_output_dir}"
+            )
+        else:
+            # Running on host directly or in non-container environment
+            logger.info(f"Detected host environment. Using paths as-is")
         
         logger.debug(
-            f"Docker extraction starting for doc_id={doc_id}"
+            f"Docker extraction starting for doc_id={doc_id}\n"
+            f"  Using PDF dir: {host_pdf_dir}\n"
+            f"  Using output dir: {host_output_dir}"
         )
         
                       
@@ -182,8 +213,9 @@ def extract_images_with_docker(
                 ext = os.path.splitext(filename)[1].lower()
                 mime_type = IMAGE_MIME_TYPES.get(ext, 'image/unknown')
                 
-                # Store relative path for database: user_id/images/extracted/doc_id/filename
-                rel_path = f"{user_id}/{EXTRACTION_SUBDIRECTORY}/{doc_id}/{filename}"
+                # Store relative path for database (with workspace/ prefix for consistency with PDFs)
+                # This matches the format used for uploaded PDFs: workspace/user_id/images/extracted/doc_id/filename
+                rel_path = f"workspace/{user_id}/{EXTRACTION_SUBDIRECTORY}/{doc_id}/{filename}"
                 
                 extracted_file_list.append({
                     'filename': filename,

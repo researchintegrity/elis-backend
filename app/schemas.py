@@ -319,3 +319,127 @@ class ImageInDB(BaseModel):
     source_type: str = "uploaded"
     document_id: Optional[str] = None
     uploaded_date: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ============================================================================
+# API RESPONSE MODELS
+# ============================================================================
+
+class ApiResponse(BaseModel):
+    """Standardized API response wrapper"""
+    success: bool = Field(..., description="Whether the request was successful")
+    message: str = Field(..., description="Response message")
+    data: Optional[dict] = Field(None, description="Response data payload")
+    errors: Optional[list] = Field(None, description="List of errors if any")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "success": True,
+                "message": "Operation completed successfully",
+                "data": {"id": "507f1f77bcf86cd799439011"},
+                "errors": None,
+                "timestamp": "2025-01-01T10:00:00"
+            }
+        }
+
+
+class PaginatedResponse(BaseModel):
+    """Paginated API response with metadata"""
+    success: bool = Field(..., description="Whether the request was successful")
+    message: str = Field(..., description="Response message")
+    data: list = Field(..., description="List of items")
+    pagination: dict = Field(..., description="Pagination metadata")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "success": True,
+                "message": "Items retrieved successfully",
+                "data": [{"id": "507f1f77bcf86cd799439011"}],
+                "pagination": {
+                    "current_page": 1,
+                    "total_pages": 10,
+                    "page_size": 10,
+                    "total_items": 100
+                },
+                "timestamp": "2025-01-01T10:00:00"
+            }
+        }
+
+
+# ============================================================================
+# Annotation Schemas
+# ============================================================================
+
+class CoordinateInfo(BaseModel):
+    """Annotation coordinates"""
+    x: float = Field(..., description="X coordinate (percentage)")
+    y: float = Field(..., description="Y coordinate (percentage)")
+    width: float = Field(..., description="Width (percentage)")
+    height: float = Field(..., description="Height (percentage)")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "x": 25.5,
+                "y": 30.1,
+                "width": 10.2,
+                "height": 15.8
+            }
+        }
+
+
+class AnnotationCreate(BaseModel):
+    """Annotation creation request"""
+    image_id: str = Field(..., description="ID of the image being annotated")
+    text: str = Field(..., min_length=1, max_length=1000, description="Annotation text")
+    coords: CoordinateInfo = Field(..., description="Annotation coordinates")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "image_id": "507f1f77bcf86cd799439013",
+                "text": "Núcleo celular identificado",
+                "coords": {
+                    "x": 25.5,
+                    "y": 30.1,
+                    "width": 10.2,
+                    "height": 15.8
+                }
+            }
+        }
+
+
+class AnnotationResponse(BaseModel):
+    """Annotation response model"""
+    id: str = Field(alias="_id", serialization_alias="_id")
+    user_id: str
+    image_id: str
+    text: str
+    coords: CoordinateInfo
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+        json_schema_extra = {
+            "example": {
+                "_id": "507f1f77bcf86cd799439014",
+                "user_id": "507f1f77bcf86cd799439011",
+                "image_id": "507f1f77bcf86cd799439013",
+                "text": "Núcleo celular identificado",
+                "coords": {
+                    "x": 25.5,
+                    "y": 30.1,
+                    "width": 10.2,
+                    "height": 15.8
+                },
+                "created_at": "2025-01-01T10:00:00",
+                "updated_at": "2025-01-01T10:00:00"
+            }
+        }
+
