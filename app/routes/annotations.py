@@ -59,7 +59,7 @@ async def create_annotation(
         "user_id": user_id_str,
         "image_id": annotation_data.image_id,
         "text": annotation_data.text,
-        "coords": annotation_data.coords,
+        "coords": annotation_data.coords.dict(),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }

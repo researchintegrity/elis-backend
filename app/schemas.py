@@ -380,7 +380,6 @@ class CoordinateInfo(BaseModel):
     y: float = Field(..., description="Y coordinate (percentage)")
     width: float = Field(..., description="Width (percentage)")
     height: float = Field(..., description="Height (percentage)")
-    unit: str = Field(default="%", description="Unit of measurement")
 
     class Config:
         schema_extra = {
@@ -388,8 +387,7 @@ class CoordinateInfo(BaseModel):
                 "x": 25.5,
                 "y": 30.1,
                 "width": 10.2,
-                "height": 15.8,
-                "unit": "%"
+                "height": 15.8
             }
         }
 
@@ -409,8 +407,7 @@ class AnnotationCreate(BaseModel):
                     "x": 25.5,
                     "y": 30.1,
                     "width": 10.2,
-                    "height": 15.8,
-                    "unit": "%"
+                    "height": 15.8
                 }
             }
         }
@@ -418,7 +415,7 @@ class AnnotationCreate(BaseModel):
 
 class AnnotationResponse(BaseModel):
     """Annotation response model"""
-    id: str = Field(alias="_id")
+    id: str = Field(alias="_id", serialization_alias="_id")
     user_id: str
     image_id: str
     text: str
@@ -426,17 +423,10 @@ class AnnotationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    @field_validator('id', mode='before')
-    @classmethod
-    def convert_object_id(cls, v):
-        """Convert MongoDB ObjectId to string"""
-        if isinstance(v, ObjectId):
-            return str(v)
-        return v
-
     class Config:
         from_attributes = True
-        schema_extra = {
+        populate_by_name = True
+        json_schema_extra = {
             "example": {
                 "_id": "507f1f77bcf86cd799439014",
                 "user_id": "507f1f77bcf86cd799439011",
@@ -446,8 +436,7 @@ class AnnotationResponse(BaseModel):
                     "x": 25.5,
                     "y": 30.1,
                     "width": 10.2,
-                    "height": 15.8,
-                    "unit": "%"
+                    "height": 15.8
                 },
                 "created_at": "2025-01-01T10:00:00",
                 "updated_at": "2025-01-01T10:00:00"
