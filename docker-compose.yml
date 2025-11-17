@@ -16,7 +16,7 @@ services:
       - mongo
       - redis
     volumes:
-      - ./workspace:/app/workspace
+      - ./system_modules/front-end-platform/workspace:/app/workspace
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - elis_network
@@ -83,7 +83,7 @@ services:
       - redis
       - mongo
     volumes:
-      - ./workspace:/app/workspace
+      - ./system_modules/front-end-platform/workspace:/app/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker1@%h -c 1
     restart: unless-stopped
@@ -102,7 +102,7 @@ services:
       - redis
       - mongo
     volumes:
-      - ./workspace:/app/workspace
+      - ./system_modules/front-end-platform/workspace:/app/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker2@%h -c 1
     restart: unless-stopped

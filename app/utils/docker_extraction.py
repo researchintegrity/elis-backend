@@ -182,9 +182,9 @@ def extract_images_with_docker(
                 ext = os.path.splitext(filename)[1].lower()
                 mime_type = IMAGE_MIME_TYPES.get(ext, 'image/unknown')
                 
-                # Store relative path for database with workspace/ prefix for consistency
-                # (uploaded images use workspace/ prefix, so extracted images should too)
-                rel_path = f"workspace/{user_id}/{EXTRACTION_SUBDIRECTORY}/{doc_id}/{filename}"
+                # Store relative path for database (without workspace/ prefix)
+                # The workspace is now at frontend path, and paths should be relative to app root
+                rel_path = f"{user_id}/{EXTRACTION_SUBDIRECTORY}/{doc_id}/{filename}"
                 
                 extracted_file_list.append({
                     'filename': filename,
