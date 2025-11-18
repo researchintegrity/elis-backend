@@ -19,7 +19,6 @@ from app.utils.file_storage import (
     save_pdf_file,
     get_extraction_output_path,
     check_storage_quota,
-    get_quota_status,
     update_user_storage_in_db
 )
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
@@ -27,6 +26,8 @@ from app.tasks.image_extraction import extract_images_from_document
 from celery.result import AsyncResult
 from app.celery_config import celery_app
 from app.services.document_service import delete_document_and_artifacts
+from app.services.resource_helpers import get_owned_resource
+from app.services.quota_helpers import augment_with_quota
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -137,9 +138,7 @@ async def upload_document(
         doc_record["_id"] = doc_id  # Ensure _id is set for response
         
         # Add quota information to response
-        quota_status = get_quota_status(user_id_str, user_quota)
-        doc_record["user_storage_used"] = quota_status["used_bytes"]
-        doc_record["user_storage_remaining"] = quota_status["remaining_bytes"]
+        doc_record = augment_with_quota(doc_record, user_id_str, user_quota)
         
         # Update user storage in database for easy access
         update_user_storage_in_db(user_id_str)
@@ -176,9 +175,6 @@ async def list_documents(
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
     
-    # Get quota info
-    quota_status = get_quota_status(user_id_str, user_quota)
-    
     # Query documents for user
     documents = list(
         documents_col.find(
@@ -193,8 +189,7 @@ async def list_documents(
     responses = []
     for doc in documents:
         doc["_id"] = str(doc["_id"])
-        doc["user_storage_used"] = quota_status["used_bytes"]
-        doc["user_storage_remaining"] = quota_status["remaining_bytes"]
+        doc = augment_with_quota(doc, user_id_str, user_quota)
         responses.append(DocumentResponse(**doc))
     
     return responses
@@ -215,33 +210,21 @@ async def get_document(
     Returns:
         DocumentResponse with storage quota info
     """
-    documents_col = get_documents_collection()
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
     
-    try:
-        doc = documents_col.find_one({
-            "_id": ObjectId(doc_id),
-            "user_id": user_id_str
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid document ID"
-        )
-    
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+    # Get document with ownership validation
+    doc = await get_owned_resource(
+        get_documents_collection,
+        doc_id,
+        user_id_str,
+        "Document"
+    )
     
     doc["_id"] = doc_id
     
     # Add quota information
-    quota_status = get_quota_status(user_id_str, user_quota)
-    doc["user_storage_used"] = quota_status["used_bytes"]
-    doc["user_storage_remaining"] = quota_status["remaining_bytes"]
+    doc = augment_with_quota(doc, user_id_str, user_quota)
     
     # Return raw dict (convert ObjectId and datetime for JSON serialization)
     from datetime import datetime as dt
@@ -276,31 +259,22 @@ async def get_document_images(
     Returns:
         List of ImageResponse objects (extracted images only)
     """
-    # Verify document belongs to user
-    documents_col = get_documents_collection()
-    try:
-        doc = documents_col.find_one({
-            "_id": ObjectId(doc_id),
-            "user_id": str(current_user["_id"])
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid document ID"
-        )
+    user_id_str = str(current_user["_id"])
     
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+    # Verify document belongs to user
+    await get_owned_resource(
+        get_documents_collection,
+        doc_id,
+        user_id_str,
+        "Document"
+    )
     
     # Get images for this document
     images_col = get_images_collection()
     images = list(
         images_col.find({
             "document_id": doc_id,
-            "user_id": str(current_user["_id"]),
+            "user_id": user_id_str,
             "source_type": "extracted"
         })
         .sort("uploaded_date", -1)
@@ -332,25 +306,15 @@ async def download_document(
     Returns:
         FileResponse with PDF file
     """
-    documents_col = get_documents_collection()
+    user_id_str = str(current_user["_id"])
     
     # Verify document belongs to user
-    try:
-        doc = documents_col.find_one({
-            "_id": ObjectId(doc_id),
-            "user_id": str(current_user["_id"])
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid document ID"
-        )
-    
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+    doc = await get_owned_resource(
+        get_documents_collection,
+        doc_id,
+        user_id_str,
+        "Document"
+    )
     
     # Check if file exists
     file_path = doc["file_path"]

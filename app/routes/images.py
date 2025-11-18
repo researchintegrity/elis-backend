@@ -9,17 +9,18 @@ from datetime import datetime
 from pathlib import Path
 
 from app.schemas import ImageResponse
-from app.db.mongodb import get_images_collection, get_documents_collection, get_annotations_collection
+from app.db.mongodb import get_images_collection, get_documents_collection
 from app.utils.security import get_current_user
 from app.utils.file_storage import (
     validate_image,
     save_image_file,
-    delete_file,
     check_storage_quota,
-    get_quota_status,
     update_user_storage_in_db
 )
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
+from app.services.image_service import delete_image_and_artifacts, list_images as list_images_service
+from app.services.resource_helpers import get_owned_resource
+from app.services.quota_helpers import augment_with_quota
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -129,9 +130,7 @@ async def upload_image(
         img_record["_id"] = img_id
         
         # Add quota information to response
-        quota_status = get_quota_status(user_id_str, user_quota)
-        img_record["user_storage_used"] = quota_status["used_bytes"]
-        img_record["user_storage_remaining"] = quota_status["remaining_bytes"]
+        img_record = augment_with_quota(img_record, user_id_str, user_quota)
         
         # Update user storage in database for easy access
         update_user_storage_in_db(user_id_str)
@@ -168,44 +167,32 @@ async def list_images(
     Returns:
         List of ImageResponse objects with storage quota info
     """
-    images_col = get_images_collection()
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
     
-    # Get quota info
-    quota_status = get_quota_status(user_id_str, user_quota)
+    try:
+        # Use service to get images
+        result = await list_images_service(
+            user_id=user_id_str,
+            source_type=source_type,
+            document_id=document_id,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Map to response models with quota info
+        responses = []
+        for img in result["images"]:
+            img = augment_with_quota(img, user_id_str, user_quota)
+            responses.append(ImageResponse(**img))
+        
+        return responses
     
-    # Build query
-    query = {"user_id": user_id_str}
-    
-    if source_type:
-        if source_type not in ["extracted", "uploaded"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="source_type must be 'extracted' or 'uploaded'"
-            )
-        query["source_type"] = source_type
-    
-    if document_id:
-        query["document_id"] = document_id
-    
-    # Query images
-    images = list(
-        images_col.find(query)
-        .sort("uploaded_date", -1)
-        .skip(offset)
-        .limit(limit)
-    )
-    
-    # Convert to response models with quota info
-    responses = []
-    for img in images:
-        img["_id"] = str(img["_id"])
-        img["user_storage_used"] = quota_status["used_bytes"]
-        img["user_storage_remaining"] = quota_status["remaining_bytes"]
-        responses.append(ImageResponse(**img))
-    
-    return responses
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 
 @router.get("/{image_id}", response_model=ImageResponse)
@@ -223,33 +210,20 @@ async def get_image(
     Returns:
         ImageResponse with storage quota info
     """
-    images_col = get_images_collection()
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
     
-    try:
-        img = images_col.find_one({
-            "_id": ObjectId(image_id),
-            "user_id": user_id_str
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid image ID"
-        )
-    
-    if not img:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found"
-        )
+    img = await get_owned_resource(
+        get_images_collection,
+        image_id,
+        user_id_str,
+        "Image"
+    )
     
     img["_id"] = image_id
     
     # Add quota information
-    quota_status = get_quota_status(user_id_str, user_quota)
-    img["user_storage_used"] = quota_status["used_bytes"]
-    img["user_storage_remaining"] = quota_status["remaining_bytes"]
+    img = augment_with_quota(img, user_id_str, user_quota)
     
     return ImageResponse(**img)
 
@@ -269,25 +243,15 @@ async def download_image(
     Returns:
         FileResponse with image file
     """
-    images_col = get_images_collection()
+    user_id_str = str(current_user["_id"])
     
     # Verify image belongs to user
-    try:
-        img = images_col.find_one({
-            "_id": ObjectId(image_id),
-            "user_id": str(current_user["_id"])
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid image ID"
-        )
-    
-    if not img:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found"
-        )
+    img = await get_owned_resource(
+        get_images_collection,
+        image_id,
+        user_id_str,
+        "Image"
+    )
     
     # Check if file exists
     file_path = img["file_path"]
@@ -329,52 +293,33 @@ async def delete_image(
         image_id: Image ID
         current_user: Current authenticated user
     """
-    images_col = get_images_collection()
-    
-    # Get image
     try:
-        img = images_col.find_one({
-            "_id": ObjectId(image_id),
-            "user_id": str(current_user["_id"])
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid image ID"
+        await delete_image_and_artifacts(
+            image_id=image_id,
+            user_id=str(current_user["_id"])
         )
-    
-    if not img:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found"
-        )
-    
-    # Check if extracted - cannot delete extracted images directly
-    if img.get("source_type") == "extracted":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot delete extracted images directly. Delete the document instead."
-        )
-    
-    try:
-        # Delete image file from disk
-        success, error = delete_file(img["file_path"])
-        if not success:
-            raise Exception(f"Failed to delete image file: {error}")
-        
-        # Delete associated annotations
-        annotations_col = get_annotations_collection()
-        annotations_col.delete_many({
-            "image_id": image_id,
-            "user_id": str(current_user["_id"])
-        })
-        
-        # Delete image record from MongoDB
-        images_col.delete_one({"_id": ObjectId(image_id)})
-        
-        # Update user storage in database
-        update_user_storage_in_db(str(current_user["_id"]))
-    
+    except ValueError as e:
+        error_msg = str(e)
+        if "Invalid image ID" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+        elif "not found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_msg
+            )
+        elif "Cannot delete" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=error_msg
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e)
+            )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

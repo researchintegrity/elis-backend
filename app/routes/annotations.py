@@ -1,7 +1,7 @@
 """
 Annotation routes for image annotations
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, status, Query
 from typing import List
 from bson import ObjectId
 from datetime import datetime
@@ -9,6 +9,7 @@ from datetime import datetime
 from app.schemas import AnnotationResponse, AnnotationCreate
 from app.db.mongodb import get_annotations_collection, get_images_collection
 from app.utils.security import get_current_user
+from app.services.resource_helpers import get_owned_resource
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 
@@ -32,26 +33,15 @@ async def create_annotation(
         HTTP 404: If image not found
         HTTP 403: If image doesn't belong to user
     """
-    images_col = get_images_collection()
     user_id_str = str(current_user["_id"])
     
     # Verify image exists and belongs to user
-    try:
-        image = images_col.find_one({
-            "_id": ObjectId(annotation_data.image_id),
-            "user_id": user_id_str
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid image ID"
-        )
-    
-    if not image:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found or doesn't belong to you"
-        )
+    await get_owned_resource(
+        get_images_collection,
+        annotation_data.image_id,
+        user_id_str,
+        "Image"
+    )
     
     # Create annotation document
     annotations_col = get_annotations_collection()
@@ -131,25 +121,14 @@ async def get_annotation(
         HTTP 404: If annotation not found
         HTTP 403: If annotation doesn't belong to user
     """
-    annotations_col = get_annotations_collection()
     user_id_str = str(current_user["_id"])
     
-    try:
-        annotation = annotations_col.find_one({
-            "_id": ObjectId(annotation_id),
-            "user_id": user_id_str
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid annotation ID"
-        )
-    
-    if not annotation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Annotation not found"
-        )
+    annotation = await get_owned_resource(
+        get_annotations_collection,
+        annotation_id,
+        user_id_str,
+        "Annotation"
+    )
     
     annotation["_id"] = str(annotation["_id"])
     return AnnotationResponse(**annotation)
@@ -171,22 +150,18 @@ async def delete_annotation(
         HTTP 404: If annotation not found
         HTTP 403: If annotation doesn't belong to user
     """
-    annotations_col = get_annotations_collection()
     user_id_str = str(current_user["_id"])
     
-    try:
-        result = annotations_col.delete_one({
-            "_id": ObjectId(annotation_id),
-            "user_id": user_id_str
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid annotation ID"
-        )
+    # Verify annotation exists and belongs to user
+    await get_owned_resource(
+        get_annotations_collection,
+        annotation_id,
+        user_id_str,
+        "Annotation"
+    )
     
-    if result.deleted_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Annotation not found"
-        )
+    annotations_col = get_annotations_collection()
+    result = annotations_col.delete_one({
+        "_id": ObjectId(annotation_id),
+        "user_id": user_id_str
+    })
