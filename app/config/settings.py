@@ -20,6 +20,16 @@ import os
 # Docker image for PDF extraction
 PDF_EXTRACTOR_DOCKER_IMAGE = "pdf-extractor:latest"
 
+# Docker image for PDF watermark removal (system_modules/watermark-removal)
+PDF_WATERMARK_REMOVAL_DOCKER_IMAGE = "pdf-watermark-removal:latest"
+
+# Template for output filename suffix when creating watermark-removed PDFs.
+# Use format placeholder `{mode}` for aggressiveness mode.
+WATERMARK_REMOVAL_OUTPUT_SUFFIX_TEMPLATE = "_watermark_removed_m{mode}.pdf"
+
+# Working directory inside the watermark-removal Docker container
+WATERMARK_REMOVAL_DOCKER_WORKDIR = "/workspace"
+
 # Extraction timeouts (in seconds)
 DOCKER_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes
