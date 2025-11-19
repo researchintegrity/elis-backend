@@ -856,24 +856,6 @@ For complete request/response examples, curl commands, and error handling, see *
 - Check password matches stored hash
 - Verify bcrypt library is properly installed
 
-## Documentation & Resources
-
-### Key Documentation Files
-
-- **API_REFERENCE.md**: Complete API endpoint documentation with examples
-- **PANEL_EXTRACTION_IMPLEMENTATION_SUMMARY.md**: Panel extraction implementation details
-- **PANEL_EXTRACTION_TESTING_GUIDE.md**: Testing guide with 28+ passing tests
-- **PANELS_CSV_PARSING_GUIDE.md**: CSV format specification and parsing logic
-- **PANEL_DATA_MODEL_SPECIFICATION.md**: Database schema details
-- **PANEL_EXTRACTION_INTEGRATION_PLAN.md**: System integration architecture
-- **IMPLEMENTATION_CHECKLIST.md**: Implementation progress tracking
-
-### API Documentation
-
-- **API_REFERENCE.md** (in repo) - Detailed endpoint specs, curl examples, error handling
-- Swagger UI interactive docs: /docs (when running)
-- ReDoc alternative: /redoc (when running)
-
 ### Running Tests
 
 ```bash
