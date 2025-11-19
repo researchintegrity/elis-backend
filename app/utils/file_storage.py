@@ -66,6 +66,29 @@ def get_extraction_output_path(user_id: str, doc_id: str) -> Path:
     return extraction_path
 
 
+def get_panel_output_path(user_id: str, doc_id: str = None) -> Path:
+    """
+    Get the path where extracted panels should be saved
+    
+    Panels are extracted from images via Docker and saved to:
+    /workspace/{user_id}/images/panels/ or /workspace/{user_id}/images/panels/{doc_id}/
+    
+    Args:
+        user_id: User ID
+        doc_id: Optional document ID (for organizing panels by source)
+        
+    Returns:
+        Path object for panels directory
+    """
+    if doc_id:
+        panels_path = UPLOAD_DIR / user_id / "images" / "panels" / doc_id
+    else:
+        panels_path = UPLOAD_DIR / user_id / "images" / "panels"
+    
+    panels_path.mkdir(parents=True, exist_ok=True)
+    return panels_path
+
+
 def generate_unique_filename(original_filename: str, prefix: str = None) -> str:
     """
     Generate a unique filename with timestamp and optional prefix

@@ -30,6 +30,16 @@ WATERMARK_REMOVAL_OUTPUT_SUFFIX_TEMPLATE = "_watermark_removed_m{mode}.pdf"
 # Working directory inside the watermark-removal Docker container
 WATERMARK_REMOVAL_DOCKER_WORKDIR = "/workspace"
 
+# Docker image for panel extraction (system_modules/panel-extractor)
+PANEL_EXTRACTOR_DOCKER_IMAGE = "panel-extractor:latest"
+
+# Working directory inside the panel-extractor Docker container
+PANEL_EXTRACTION_DOCKER_WORKDIR = "/workspace"
+
+# Panel extraction settings
+PANEL_EXTRACTION_TIMEOUT = 600  # 10 minutes (panel extraction can take longer)
+MAX_IMAGES_PER_EXTRACTION = 20  # Maximum number of images to process in one batch
+
 # Extraction timeouts (in seconds)
 DOCKER_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes
