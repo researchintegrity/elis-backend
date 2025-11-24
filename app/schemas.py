@@ -677,6 +677,7 @@ class PanelExtractionStatusResponse(BaseModel):
 class AnalysisType(str, Enum):
     SINGLE_IMAGE_COPY_MOVE = "single_image_copy_move"
     CROSS_IMAGE_COPY_MOVE = "cross_image_copy_move"
+    TRUFOR = "trufor"
 
 
 class AnalysisStatus(str, Enum):
@@ -711,10 +712,12 @@ class CrossImageAnalysisCreate(BaseModel):
 
 class AnalysisResult(BaseModel):
     """Generic analysis result container"""
-    method: int
+    method: Optional[int] = None
     timestamp: datetime
     matches_image: Optional[str] = None
     clusters_image: Optional[str] = None
+    visualization: Optional[str] = None
+    files: Optional[List[str]] = None
     logs: Optional[Dict[str, Any]] = None
 
 

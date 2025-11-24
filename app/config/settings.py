@@ -45,6 +45,12 @@ COPY_MOVE_DETECTION_DOCKER_IMAGE = "copy-move-detection:latest"
 COPY_MOVE_DETECTION_TIMEOUT = 600  # 10 minutes
 COPY_MOVE_DETECTION_DOCKER_WORKDIR = "/workspace"
 
+# Docker image for TruFor Detection (system_modules/TruFor)
+TRUFOR_DOCKER_IMAGE = "trufor:latest"
+TRUFOR_TIMEOUT = 600  # 10 minutes
+TRUFOR_DOCKER_WORKDIR = "/workspace"
+TRUFOR_USE_GPU = os.getenv("TRUFOR_USE_GPU", "true").lower() == "true"
+
 # Extraction timeouts (in seconds)
 DOCKER_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes
