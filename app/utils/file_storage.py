@@ -11,10 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Import storage configuration
 from app.config.storage_quota import MAX_PDF_FILE_SIZE, MAX_IMAGE_FILE_SIZE, DEFAULT_USER_STORAGE_QUOTA
-from app.config.settings import EXTRACTION_SUBDIRECTORY, PDF_EXTRACTOR_DOCKER_IMAGE
-
-# Base upload directory
-UPLOAD_DIR = Path("workspace")
+from app.config.settings import EXTRACTION_SUBDIRECTORY, PDF_EXTRACTOR_DOCKER_IMAGE, UPLOAD_DIR
 
 # File size limits (in bytes) - imported from config
 MAX_PDF_SIZE = MAX_PDF_FILE_SIZE

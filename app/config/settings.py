@@ -12,6 +12,14 @@ To customize settings:
 """
 
 import os
+from pathlib import Path
+
+# ============================================================================
+# FILE STORAGE SETTINGS
+# ============================================================================
+
+# Base directory for all user uploads and workspace files
+UPLOAD_DIR = Path("workspace")
 
 # ============================================================================
 # EXTRACTION SETTINGS
