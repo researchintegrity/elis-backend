@@ -117,6 +117,22 @@ def get_annotations_collection():
     return collection
 
 
+def get_analyses_collection():
+    """Get analyses collection with indexes for copy-move detection"""
+    collection = db_connection.get_collection("analyses")
+    
+    # Create indexes for better performance
+    collection.create_index("user_id")
+    collection.create_index("source_image_id")
+    collection.create_index("target_image_id")
+    collection.create_index("type")
+    collection.create_index("status")
+    collection.create_index("created_at")
+    collection.create_index([("user_id", 1), ("created_at", -1)])
+    
+    return collection
+
+
 def get_database():
     """Get database instance"""
     return db_connection.get_database()

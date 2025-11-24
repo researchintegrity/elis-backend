@@ -40,6 +40,11 @@ PANEL_EXTRACTION_DOCKER_WORKDIR = "/workspace"
 PANEL_EXTRACTION_TIMEOUT = 600  # 10 minutes (panel extraction can take longer)
 MAX_IMAGES_PER_EXTRACTION = 20  # Maximum number of images to process in one batch
 
+# Docker image for Copy-Move Detection (system_modules/copy-move-detection)
+COPY_MOVE_DETECTION_DOCKER_IMAGE = "copy-move-detection:latest"
+COPY_MOVE_DETECTION_TIMEOUT = 600  # 10 minutes
+COPY_MOVE_DETECTION_DOCKER_WORKDIR = "/workspace"
+
 # Extraction timeouts (in seconds)
 DOCKER_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes

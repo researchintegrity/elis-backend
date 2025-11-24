@@ -3,8 +3,9 @@ Pydantic schemas for request/response validation
 """
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from bson import ObjectId
+from enum import Enum
 from app.config.settings import (
     USERNAME_MIN_LENGTH,
     USERNAME_MAX_LENGTH,
@@ -271,6 +272,18 @@ class ImageCreate(BaseModel):
         }
 
 
+class CopyMoveAnalysisRequest(BaseModel):
+    """Request to start copy-move analysis"""
+    method: int = Field(2, ge=1, le=5, description="Detection method (1-5)")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "method": 2
+            }
+        }
+
+
 class ImageResponse(BaseModel):
     """Image response model"""
     id: str = Field(alias="_id")
@@ -292,6 +305,12 @@ class ImageResponse(BaseModel):
     original_filename: Optional[str] = None  # Original filename before _id rename
     # Image type management
     image_type: List[str] = Field(default_factory=list, description="User-editable image types (e.g., 'figure', 'table', 'equation')")
+    
+    # Analysis fields
+    analysis_status: Dict[str, str] = Field(default_factory=dict, description="Status of various analyses (e.g. {'copy_move': 'processing'})")
+    analysis_results: Dict[str, Dict] = Field(default_factory=dict, description="Results of analyses")
+    analysis_ids: List[str] = Field(default_factory=list, description="List of analysis IDs involving this image")
+    
     uploaded_date: datetime
     user_storage_used: int = 0  # Total bytes used by user
     user_storage_remaining: int = 1073741824  # Remaining quota
@@ -340,6 +359,7 @@ class ImageInDB(BaseModel):
     source_type: str = "uploaded"
     document_id: Optional[str] = None
     uploaded_date: datetime = Field(default_factory=datetime.utcnow)
+    analysis_ids: List[str] = Field(default_factory=list)
 
 
 # ============================================================================
@@ -648,4 +668,72 @@ class PanelExtractionStatusResponse(BaseModel):
                 "error": None
             }
         }
+
+
+# ============================================================================
+# ANALYSIS SCHEMAS
+# ============================================================================
+
+class AnalysisType(str, Enum):
+    SINGLE_IMAGE_COPY_MOVE = "single_image_copy_move"
+    CROSS_IMAGE_COPY_MOVE = "cross_image_copy_move"
+
+
+class AnalysisStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AnalysisBase(BaseModel):
+    """Base analysis model"""
+    type: AnalysisType
+    user_id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    status: AnalysisStatus = AnalysisStatus.PENDING
+    error: Optional[str] = None
+
+
+class SingleImageAnalysisCreate(BaseModel):
+    """Request to create a single image analysis"""
+    image_id: str
+    method: int = Field(2, ge=1, le=5, description="Detection method (1-5)")
+
+
+class CrossImageAnalysisCreate(BaseModel):
+    """Request to create a cross image analysis"""
+    source_image_id: str
+    target_image_id: str
+    method: int = Field(2, ge=1, le=5, description="Detection method (1-5)")
+
+
+class AnalysisResult(BaseModel):
+    """Generic analysis result container"""
+    method: int
+    timestamp: datetime
+    matches_image: Optional[str] = None
+    clusters_image: Optional[str] = None
+    logs: Optional[Dict[str, Any]] = None
+
+
+class AnalysisResponse(AnalysisBase):
+    """Analysis response model"""
+    id: str = Field(alias="_id")
+    source_image_id: str
+    target_image_id: Optional[str] = None
+    results: Optional[AnalysisResult] = None
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_object_id(cls, v):
+        """Convert MongoDB ObjectId to string"""
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
+
+    class Config:
+        json_encoders = {ObjectId: str}
+        populate_by_name = True
 

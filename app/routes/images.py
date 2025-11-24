@@ -12,6 +12,8 @@ from app.schemas import (
     ImageResponse,
     ImageTypeListResponse,
     ImageTypesUpdateRequest,
+    CopyMoveAnalysisRequest,
+    MessageResponse
 )
 from app.db.mongodb import get_images_collection, get_documents_collection
 from app.utils.security import get_current_user
@@ -35,6 +37,7 @@ from app.services.panel_extraction_service import (
     get_panel_extraction_status,
     get_panels_by_source_image
 )
+from app.tasks.copy_move_detection import detect_copy_move
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -827,3 +830,80 @@ async def list_all_image_types(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve image types: {str(e)}"
         )
+
+
+from app.schemas import (
+    ImageResponse,
+    ImageCreate,
+    MessageResponse,
+    CopyMoveAnalysisRequest,
+    AnalysisType,
+    AnalysisStatus
+)
+from app.db.mongodb import get_images_collection, get_analyses_collection
+from app.tasks.copy_move_detection import detect_copy_move
+from datetime import datetime
+
+# ...existing code...
+
+@router.post("/{image_id}/analyze/copy-move", status_code=status.HTTP_202_ACCEPTED, response_model=dict)
+async def analyze_copy_move(
+    image_id: str,
+    request: CopyMoveAnalysisRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Start copy-move detection analysis on an image.
+    
+    Args:
+        image_id: ID of the image to analyze
+        request: Analysis configuration (method)
+        current_user: Current authenticated user
+        
+    Returns:
+        Dict with analysis_id and message
+    """
+    user_id_str = str(current_user["_id"])
+    
+    # Verify ownership
+    image = await get_owned_resource(
+        get_images_collection,
+        image_id,
+        user_id_str,
+        "Image"
+    )
+    
+    # Create Analysis document
+    analyses_col = get_analyses_collection()
+    analysis_doc = {
+        "type": AnalysisType.SINGLE_IMAGE_COPY_MOVE,
+        "user_id": user_id_str,
+        "source_image_id": image_id,
+        "status": AnalysisStatus.PENDING,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        "method": request.method
+    }
+    result = analyses_col.insert_one(analysis_doc)
+    analysis_id = str(result.inserted_id)
+    
+    # Update Image document with analysis_id
+    images_col = get_images_collection()
+    images_col.update_one(
+        {"_id": ObjectId(image_id)},
+        {"$addToSet": {"analysis_ids": analysis_id}}
+    )
+    
+    # Trigger task with analysis_id
+    detect_copy_move.delay(
+        analysis_id=analysis_id,
+        image_id=image_id,
+        user_id=user_id_str,
+        image_path=image["file_path"],
+        method=request.method
+    )
+    
+    return {
+        "message": "Copy-move analysis started",
+        "analysis_id": analysis_id
+    }

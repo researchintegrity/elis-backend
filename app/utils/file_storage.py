@@ -89,6 +89,42 @@ def get_panel_output_path(user_id: str, doc_id: str = None) -> Path:
     return panels_path
 
 
+def get_analysis_output_path(user_id: str, analysis_id: str, analysis_type: str) -> Path:
+    """
+    Get the path where analysis results should be saved
+    
+    Results are saved to:
+    /workspace/{user_id}/analyses/{analysis_type}/{analysis_id}/
+    
+    Args:
+        user_id: User ID
+        analysis_id: Analysis ID
+        analysis_type: Type of analysis (e.g., 'single_image_copy_move', 'cross_image_copy_move')
+        
+    Returns:
+        Path object for analysis directory
+    """
+    # Map analysis types to folder names if needed, or use type directly
+    folder_name = "cmfd" if analysis_type == "single_image_copy_move" else "cmfd_cross"
+    
+    analysis_path = UPLOAD_DIR / user_id / "analyses" / folder_name / analysis_id
+    analysis_path.mkdir(parents=True, exist_ok=True)
+    return analysis_path
+
+def get_cmfd_output_path(user_id: str, image_id: str, method: int = None) -> Path:
+    """
+    DEPRECATED: Use get_analysis_output_path instead.
+    Get the path where copy-move detection results should be saved
+    """
+    if method:
+        cmfd_path = UPLOAD_DIR / user_id / "analyses" / "cmfd" / str(method) / image_id
+    else:
+        cmfd_path = UPLOAD_DIR / user_id / "analyses" / "cmfd" / image_id
+        
+    cmfd_path.mkdir(parents=True, exist_ok=True)
+    return cmfd_path
+
+
 def generate_unique_filename(original_filename: str, prefix: str = None) -> str:
     """
     Generate a unique filename with timestamp and optional prefix
