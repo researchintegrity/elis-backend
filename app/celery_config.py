@@ -26,7 +26,14 @@ result_backend = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB + 1}"
 celery_app = Celery(
     "elis_tasks",
     broker=broker_url,
-    backend=result_backend
+    backend=result_backend,
+    include=[
+        "app.tasks.copy_move_detection",
+        "app.tasks.trufor",
+        "app.tasks.image_extraction",
+        "app.tasks.panel_extraction",
+        "app.tasks.watermark_removal"
+    ]
 )
 
 # Configuration

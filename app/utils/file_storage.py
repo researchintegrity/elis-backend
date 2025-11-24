@@ -105,7 +105,14 @@ def get_analysis_output_path(user_id: str, analysis_id: str, analysis_type: str)
         Path object for analysis directory
     """
     # Map analysis types to folder names if needed, or use type directly
-    folder_name = "cmfd" if analysis_type == "single_image_copy_move" else "cmfd_cross"
+    if analysis_type == "single_image_copy_move":
+        folder_name = "cmfd"
+    elif analysis_type == "cross_image_copy_move":
+        folder_name = "cmfd_cross"
+    elif analysis_type == "trufor":
+        folder_name = "trufor"
+    else:
+        folder_name = analysis_type
     
     analysis_path = UPLOAD_DIR / user_id / "analyses" / folder_name / analysis_id
     analysis_path.mkdir(parents=True, exist_ok=True)

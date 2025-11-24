@@ -4,6 +4,7 @@ from app.db.mongodb import get_analyses_collection, get_images_collection
 from app.schemas import (
     AnalysisResponse,
     CrossImageAnalysisCreate,
+    SingleImageAnalysisCreate,
     AnalysisType,
     AnalysisStatus
 )
@@ -113,3 +114,52 @@ async def analyze_copy_move_cross(
         "message": "Cross-image copy-move analysis started",
         "analysis_id": analysis_id
     }
+
+@router.post("/trufor", status_code=status.HTTP_202_ACCEPTED, response_model=dict)
+async def analyze_trufor(
+    request: SingleImageAnalysisCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Start TruFor forgery detection analysis.
+    """
+    user_id_str = str(current_user["_id"])
+    
+    # Verify ownership
+    image = await get_owned_resource(
+        get_images_collection,
+        request.image_id,
+        user_id_str,
+        "Image"
+    )
+    
+    # Create Analysis document
+    analyses_col = get_analyses_collection()
+    analysis_doc = {
+        "type": AnalysisType.TRUFOR,
+        "user_id": user_id_str,
+        "source_image_id": request.image_id,
+        "status": AnalysisStatus.PENDING,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+    result = analyses_col.insert_one(analysis_doc)
+    analysis_id = str(result.inserted_id)
+    
+    # Update Image document
+    images_col = get_images_collection()
+    images_col.update_one(
+        {"_id": ObjectId(request.image_id)},
+        {"$addToSet": {"analysis_ids": analysis_id}}
+    )
+    
+    # Trigger task
+    from app.tasks.trufor import detect_trufor
+    detect_trufor.delay(
+        analysis_id=analysis_id,
+        image_id=request.image_id,
+        user_id=user_id_str,
+        image_path=image["file_path"]
+    )
+    
+    return {"message": "TruFor analysis started", "analysis_id": analysis_id}
