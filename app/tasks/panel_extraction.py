@@ -279,7 +279,7 @@ def _create_panel_document(
         panel_info: Dict with panel data from PANELS.csv parsing
         user_id: User who owns this panel
         output_dir: Central panels directory where Docker outputs files
-                   Format: /app/workspace/{user_id}/images/panels
+                   Format: /workspace/{user_id}/images/panels
 
     Returns:
         MongoDB document ready to insert

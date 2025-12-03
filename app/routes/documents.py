@@ -127,8 +127,8 @@ async def upload_document(
         
         # Convert relative path to absolute path for worker container
         # file_path is like "workspace/user_id/pdfs/file.pdf"
-        # In worker container, this should be "/app/workspace/user_id/pdfs/file.pdf"
-        absolute_pdf_path = f"/app/{file_path}"
+        # In worker container, this should be "/workspace/user_id/pdfs/file.pdf"
+        absolute_pdf_path = f"/{file_path}"
         
         # ✨ QUEUE IMAGE EXTRACTION TASK (asynchronous - returns immediately)
         task = extract_images_from_document.delay(

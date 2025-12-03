@@ -29,9 +29,9 @@ def _convert_path_for_provenance(file_path: str) -> str:
     Returns:
         Path that Provenance can access via its /workspace mount
     """
-    # If it's a container path (/app/workspace/...), convert to /workspace/...
+    # If it's a container path (/workspace/...), convert to /workspace/...
     if is_container_path(file_path):
-        rel_path = file_path[get_container_path_length():]  # Remove /app/workspace
+        rel_path = file_path[get_container_path_length():]  # Remove /workspace
         return f"/workspace{rel_path}"
     
     # If it's a workspace path (workspace/...), convert to /workspace/...

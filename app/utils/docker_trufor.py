@@ -45,7 +45,29 @@ def run_trufor_detection_with_docker(
         docker_image = TRUFOR_DOCKER_IMAGE
 
     if not os.path.exists(image_path):
-        return False, f"Source image file not found: {image_path}", results
+        # Try to resolve relative path if it starts with workspace/
+        if image_path.startswith("workspace/"):
+             # Assuming we are in the root of the project or where workspace is accessible
+             # Try to find where workspace is located
+             workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
+             # If image_path is "workspace/...", remove "workspace/" prefix and join with workspace_root
+             rel_path = image_path[len("workspace/"):]
+             abs_path = os.path.join(workspace_root, rel_path)
+             
+             if os.path.exists(abs_path):
+                 image_path = abs_path
+             else:
+                 # Try checking if we are already in a directory containing workspace
+                 if os.path.exists(os.path.abspath(image_path)):
+                     image_path = os.path.abspath(image_path)
+                 else:
+                     # Last resort: check if it's relative to CWD
+                     if os.path.exists(os.path.join(os.getcwd(), image_path)):
+                         image_path = os.path.join(os.getcwd(), image_path)
+                     else:
+                         return False, f"Source image file not found: {image_path}", results
+        else:
+            return False, f"Source image file not found: {image_path}", results
     
     # Ensure absolute path
     image_path = os.path.abspath(image_path)
@@ -65,14 +87,14 @@ def run_trufor_detection_with_docker(
     host_image_dir = image_dir
     host_output_dir = output_dir_path
     
-    workspace_path = os.getenv("WORKSPACE_PATH")
+    workspace_path = os.getenv("HOST_WORKSPACE_PATH")
     container_path_len = get_container_path_length()
     
     if is_container_path(image_dir):
         logger.info(f"Detected container environment. Converting paths for host Docker daemon")
         
         if not workspace_path:
-            return False, "WORKSPACE_PATH environment variable not set", results
+            return False, "HOST_WORKSPACE_PATH environment variable not set", results
         
         rel_path = image_dir[container_path_len:]
         host_image_dir = workspace_path.rstrip('/') + '/' + rel_path.lstrip('/')

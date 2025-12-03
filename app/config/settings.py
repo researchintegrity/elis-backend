@@ -19,7 +19,8 @@ from pathlib import Path
 # ============================================================================
 
 # Base directory for all user uploads and workspace files
-UPLOAD_DIR = Path("workspace")
+# Use absolute path for workspace to avoid issues with relative paths in different contexts
+UPLOAD_DIR = Path(os.getenv("WORKSPACE_PATH", os.path.abspath("workspace")))
 
 # ============================================================================
 # EXTRACTION SETTINGS
@@ -92,7 +93,7 @@ DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_IMAGE_CHECK_TIMEOUT = 10  # Check if image exists
 
 # Path constants
-APP_WORKSPACE_PREFIX = "/app/workspace"
+APP_WORKSPACE_PREFIX = "/workspace"
 EXTRACTION_SUBDIRECTORY = "images/extracted"
 
 # ============================================================================
@@ -169,7 +170,7 @@ def get_container_path_prefix() -> str:
     Get the prefix used for container paths (for path detection)
     
     Returns:
-        Container path prefix: /app/workspace
+        Container path prefix: /workspace
     """
     return APP_WORKSPACE_PREFIX
 
@@ -192,7 +193,7 @@ def get_container_path_length() -> int:
     Get the length of the container path prefix (for string slicing)
     
     Returns:
-        Length of /app/workspace
+        Length of /workspace
     """
     return len(APP_WORKSPACE_PREFIX)
 
@@ -202,17 +203,17 @@ def convert_container_path_to_host(container_path: str) -> str:
     Convert a container path to a relative workspace path.
     
     Args:
-        container_path: Path inside container (starts with /app/workspace)
+        container_path: Path inside container (starts with /workspace)
         
     Returns:
         Relative path from workspace root (without WORKSPACE_ROOT prefix)
         
     Examples:
-        /app/workspace/user_id/images/... → workspace/user_id/images/...
+        /workspace/user_id/images/... → workspace/user_id/images/...
     """
     if is_container_path(container_path):
-        # Remove /app/workspace prefix, leaving just the relative path
-        rel_path = container_path[get_container_path_length():]  # Removes /app/workspace
+        # Remove /workspace prefix, leaving just the relative path
+        rel_path = container_path[get_container_path_length():]  # Removes /workspace
         # Add 'workspace' prefix back to create workspace-relative path
         return "workspace" + rel_path
     return container_path

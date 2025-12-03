@@ -68,8 +68,8 @@ async def initiate_watermark_removal(
     
     # Build absolute PDF path for worker container
     # file_path is like "workspace/user_id/pdfs/file.pdf"
-    # In worker container, this should be "/app/workspace/user_id/pdfs/file.pdf"
-    absolute_pdf_path = f"/app/{doc['file_path']}"
+    # In worker container, this should be "/workspace/user_id/pdfs/file.pdf"
+    absolute_pdf_path = f"/{doc['file_path']}"
     
     logger.info(
         f"Initiating watermark removal for doc_id={document_id}, "

@@ -26,9 +26,10 @@ from app.utils.docker_cbir import (
 class TestPathConversion:
     """Test path conversion utilities"""
     
-    def test_convert_container_path_to_cbir(self):
-        """Test converting container path (/app/workspace/...) to CBIR format"""
-        container_path = "/app/workspace/user123/images/test.jpg"
+    def test_convert_path_for_cbir(self):
+        """Test converting container path (/workspace/...) to CBIR format"""
+        # Test container path
+        container_path = "/workspace/user123/images/test.jpg"
         result = _convert_path_for_cbir(container_path)
         assert result == "/workspace/user123/images/test.jpg"
     
@@ -106,7 +107,7 @@ class TestIndexImage:
         
         success, message, data = index_image(
             user_id="user123",
-            image_path="/app/workspace/user123/images/test.jpg",
+            image_path="/workspace/user123/images/test.jpg",
             labels=["Western Blot"]
         )
         
@@ -129,7 +130,7 @@ class TestIndexImage:
         
         success, message, data = index_image(
             user_id="user123",
-            image_path="/app/workspace/user123/images/missing.jpg"
+            image_path="/workspace/user123/images/missing.jpg"
         )
         
         assert success is False
@@ -194,7 +195,7 @@ class TestSearchSimilarImages:
         
         success, message, results = search_similar_images(
             user_id="user123",
-            image_path="/app/workspace/user123/images/query.jpg",
+            image_path="/workspace/user123/images/query.jpg",
             top_k=10
         )
         
@@ -214,7 +215,7 @@ class TestSearchSimilarImages:
         
         success, message, results = search_similar_images(
             user_id="user123",
-            image_path="/app/workspace/user123/images/query.jpg",
+            image_path="/workspace/user123/images/query.jpg",
             top_k=5,
             labels=["Western Blot", "Microscopy"]
         )
@@ -275,7 +276,7 @@ class TestDeleteOperations:
         
         success, message = delete_image_from_index(
             user_id="user123",
-            image_path="/app/workspace/user123/images/to_delete.jpg"
+            image_path="/workspace/user123/images/to_delete.jpg"
         )
         
         assert success is True
@@ -289,9 +290,9 @@ class TestDeleteOperations:
         mock_post.return_value = mock_response
         
         paths = [
-            "/app/workspace/user123/images/img1.jpg",
-            "/app/workspace/user123/images/img2.jpg",
-            "/app/workspace/user123/images/img3.jpg"
+            "/workspace/user123/images/img1.jpg",
+            "/workspace/user123/images/img2.jpg",
+            "/workspace/user123/images/img3.jpg"
         ]
         
         success, message, data = delete_images_batch("user123", paths)
@@ -332,9 +333,9 @@ class TestCheckImagesIndexed:
         mock_post.return_value = mock_response
         
         paths = [
-            "/app/workspace/user123/images/img1.jpg",
-            "/app/workspace/user123/images/img2.jpg",
-            "/app/workspace/user123/images/img3.jpg"
+            "/workspace/user123/images/img1.jpg",
+            "/workspace/user123/images/img2.jpg",
+            "/workspace/user123/images/img3.jpg"
         ]
         
         success, message, visibility = check_images_indexed("user123", paths)

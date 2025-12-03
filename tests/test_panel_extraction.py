@@ -274,14 +274,14 @@ class TestPathConversion:
     def test_extract_panels_with_docker_path_conversion(self):
         """Test that Docker wrapper handles path conversion correctly."""
         # This test verifies the path conversion logic would work
-        workspace_path = os.environ.get("WORKSPACE_PATH", "/app/workspace")
+        workspace_path = os.environ.get("WORKSPACE_PATH", "/workspace")
         
         # Simulate a container path
-        container_path = "/app/workspace/user123/images/source.png"
+        container_path = "/workspace/user123/images/source.png"
         
         # Verify conversion logic
-        if container_path.startswith("/app/workspace"):
-            converted_path = container_path.replace("/app/workspace", workspace_path)
+        if container_path.startswith("/workspace"):
+            converted_path = container_path.replace("/workspace", workspace_path)
             expected = "/home/user/workspace/user123/images/source.png"
             assert converted_path == expected
 

@@ -71,9 +71,28 @@ def extract_images_with_docker(
     try:
         # Validate PDF file exists
         if not os.path.exists(pdf_file_path):
-            error_msg = f"PDF file not found: {pdf_file_path}"
-            logger.error(error_msg)
-            return 0, [error_msg], []
+            # Try to resolve relative path if it starts with workspace/
+            if pdf_file_path.startswith("workspace/"):
+                 workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
+                 rel_path = pdf_file_path[len("workspace/"):]
+                 abs_path = os.path.join(workspace_root, rel_path)
+                 
+                 if os.path.exists(abs_path):
+                     pdf_file_path = abs_path
+                 else:
+                     if os.path.exists(os.path.abspath(pdf_file_path)):
+                         pdf_file_path = os.path.abspath(pdf_file_path)
+                     else:
+                         if os.path.exists(os.path.join(os.getcwd(), pdf_file_path)):
+                             pdf_file_path = os.path.join(os.getcwd(), pdf_file_path)
+                         else:
+                             error_msg = f"PDF file not found: {pdf_file_path}"
+                             logger.error(error_msg)
+                             return 0, [error_msg], []
+            else:
+                error_msg = f"PDF file not found: {pdf_file_path}"
+                logger.error(error_msg)
+                return 0, [error_msg], []
         
         # Convert to absolute paths for Docker
         pdf_file_path = os.path.abspath(pdf_file_path)
@@ -108,15 +127,15 @@ def extract_images_with_docker(
         #   - We pass this directly to Docker since Docker daemon is on same host
         #
         # In container environment (Celery worker in Docker):
-        #   - pdf_file_path will be like "/app/workspace/user/pdfs/file.pdf"
+        #   - pdf_file_path will be like "/workspace/user/pdfs/file.pdf"
         #   - Docker daemon is on the host, needs the actual host path
         #   - We need to convert using WORKSPACE_PATH environment variable
         
         host_pdf_dir = pdf_dir
         host_output_dir = output_dir
         
-        # If path starts with /app/workspace, we're in the worker container
-        workspace_path = os.getenv("WORKSPACE_PATH")
+        # If path starts with /workspace, we're in the worker container
+        workspace_path = os.getenv("HOST_WORKSPACE_PATH")
         container_path_len = get_container_path_length()
         
         logger.debug(f"Path analysis: container_path_len={container_path_len}, is_container={is_container_path(pdf_dir)}")
@@ -126,15 +145,15 @@ def extract_images_with_docker(
             logger.info(f"Detected container environment. Converting paths for host Docker daemon")
             
             if not workspace_path:
-                error_msg = "WORKSPACE_PATH environment variable not set"
+                error_msg = "HOST_WORKSPACE_PATH environment variable not set"
                 logger.error(error_msg)
                 extraction_errors.append(error_msg)
                 return 0, extraction_errors, []
             
-            # Convert: /app/workspace/user_id/pdfs/... → /host/path/workspace/user_id/pdfs/...
-            # Example: /app/workspace/abc123/pdfs/file.pdf
+            # Convert: /workspace/user_id/pdfs/... → /host/path/workspace/user_id/pdfs/...
+            # Example: /workspace/abc123/pdfs/file.pdf
             # Get relative path: abc123/pdfs
-            rel_path = pdf_dir[container_path_len:]  # Remove /app/workspace prefix
+            rel_path = pdf_dir[container_path_len:]  # Remove /workspace prefix
             host_pdf_dir = workspace_path + rel_path
             
             # Do the same for output directory

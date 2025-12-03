@@ -86,11 +86,30 @@ def extract_panels_with_docker(
             return False, error_msg, output_info
 
         # Validate all image files exist
-        for path in image_paths:
+        for i, path in enumerate(image_paths):
             if not os.path.exists(path):
-                error_msg = f"Image file not found: {path}"
-                logger.error(error_msg)
-                return False, error_msg, output_info
+                # Try to resolve relative path if it starts with workspace/
+                if path.startswith("workspace/"):
+                     workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
+                     rel_path = path[len("workspace/"):]
+                     abs_path = os.path.join(workspace_root, rel_path)
+                     
+                     if os.path.exists(abs_path):
+                         image_paths[i] = abs_path
+                     else:
+                         if os.path.exists(os.path.abspath(path)):
+                             image_paths[i] = os.path.abspath(path)
+                         else:
+                             if os.path.exists(os.path.join(os.getcwd(), path)):
+                                 image_paths[i] = os.path.join(os.getcwd(), path)
+                             else:
+                                 error_msg = f"Image file not found: {path}"
+                                 logger.error(error_msg)
+                                 return False, error_msg, output_info
+                else:
+                    error_msg = f"Image file not found: {path}"
+                    logger.error(error_msg)
+                    return False, error_msg, output_info
 
         # Convert to absolute paths
         image_paths = [os.path.abspath(p) for p in image_paths]
@@ -106,16 +125,16 @@ def extract_panels_with_docker(
                 return False, error_msg, output_info
 
         # Create output directory for panels, organized by source image
-        # Structure: /app/workspace/{user_id}/images/panels/{source_image_id}/{figname}/
+        # Structure: /workspace/{user_id}/images/panels/{source_image_id}/{figname}/
         # All panels should be in user-specific directory, not global location
         
         # Determine workspace root - construct correct path
-        # input_dir format: /app/workspace/{user_id}/images/extracted/{doc_id}
-        #             or: /app/workspace/{user_id}/images/uploaded
-        # We need: /app/workspace/{user_id}/images/panels
+        # input_dir format: /workspace/{user_id}/images/extracted/{doc_id}
+        #             or: /workspace/{user_id}/images/uploaded
+        # We need: /workspace/{user_id}/images/panels
         
-        # Extract user_id from path: /app/workspace/{user_id}/images/...
-        # Split path and find the user_id (third component after /app/workspace)
+        # Extract user_id from path: /workspace/{user_id}/images/...
+        # Split path and find the user_id (third component after /workspace)
         path_parts = input_dir.split(os.sep)
         
         # Find 'workspace' in path and get the next component (user_id)
@@ -146,7 +165,7 @@ def extract_panels_with_docker(
         host_input_dir = input_dir
         host_output_dir = output_dir
 
-        workspace_path = os.getenv("WORKSPACE_PATH")
+        workspace_path = os.getenv("HOST_WORKSPACE_PATH")
         container_path_len = get_container_path_length()
 
         if is_container_path(input_dir):
@@ -154,11 +173,11 @@ def extract_panels_with_docker(
             logger.info(f"Detected container environment. Converting paths for host Docker daemon")
 
             if not workspace_path:
-                error_msg = "WORKSPACE_PATH environment variable not set"
+                error_msg = "HOST_WORKSPACE_PATH environment variable not set"
                 logger.error(error_msg)
                 return False, error_msg, output_info
 
-            # Convert: /app/workspace/user_id/... → /host/path/workspace/user_id/...
+            # Convert: /workspace/user_id/... → /host/path/workspace/user_id/...
             rel_input_path = input_dir[container_path_len:]
             rel_output_path = output_dir[container_path_len:]
             host_input_dir = workspace_path + rel_input_path

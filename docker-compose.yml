@@ -5,26 +5,27 @@ services:
   api:
     build: .
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_PORT:-8000}:${API_PORT:-8000}"
     environment:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_HOURS: 24
-      WORKSPACE_PATH: ${WORKSPACE_PATH}
+      WORKSPACE_PATH: /workspace
+      HOST_WORKSPACE_PATH: ${WORKSPACE_PATH}
       # CBIR service configuration (use container name when running in Docker)
       CBIR_SERVICE_HOST: ${CBIR_SERVICE_HOST:-cbir-service}
       CBIR_SERVICE_PORT: ${CBIR_SERVICE_PORT:-8001}
       # Provenance service configuration
       PROVENANCE_SERVICE_HOST: provenance-service
-      PROVENANCE_SERVICE_PORT: 8000
+      PROVENANCE_SERVICE_PORT: ${PROVENANCE_SERVICE_PORT:-8000}
     depends_on:
       - mongo
       - redis
     volumes:
-      - ${WORKSPACE_PATH}:/app/workspace
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - ${WORKSPACE_PATH}:/workspace
+    command: uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT:-8000} --reload
     networks:
       - elis_network
       - milvus # Connect to CBIR/Milvus network for inter-service communication
@@ -86,7 +87,8 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: ${WORKSPACE_PATH}
+      WORKSPACE_PATH: /workspace
+      HOST_WORKSPACE_PATH: ${WORKSPACE_PATH}
       JWT_SECRET: ${JWT_SECRET}
       TRUFOR_USE_GPU: "false"
       # CBIR service configuration (use container name when running in Docker)
@@ -94,12 +96,12 @@ services:
       CBIR_SERVICE_PORT: ${CBIR_SERVICE_PORT:-8001}
       # Provenance service configuration
       PROVENANCE_SERVICE_HOST: provenance-service
-      PROVENANCE_SERVICE_PORT: 8000
+      PROVENANCE_SERVICE_PORT: ${PROVENANCE_SERVICE_PORT:-8000}
     depends_on:
       - redis
       - mongo
     volumes:
-      - ${WORKSPACE_PATH}:/app/workspace
+      - ${WORKSPACE_PATH}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker1@%h -c 1
     restart: unless-stopped
@@ -114,7 +116,8 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: ${WORKSPACE_PATH}
+      WORKSPACE_PATH: /workspace
+      HOST_WORKSPACE_PATH: ${WORKSPACE_PATH}
       JWT_SECRET: ${JWT_SECRET}
       TRUFOR_USE_GPU: "false"
       # CBIR service configuration (use container name when running in Docker)
@@ -122,12 +125,12 @@ services:
       CBIR_SERVICE_PORT: ${CBIR_SERVICE_PORT:-8001}
       # Provenance service configuration
       PROVENANCE_SERVICE_HOST: provenance-service
-      PROVENANCE_SERVICE_PORT: 8000
+      PROVENANCE_SERVICE_PORT: ${PROVENANCE_SERVICE_PORT:-8000}
     depends_on:
       - redis
       - mongo
     volumes:
-      - ${WORKSPACE_PATH}:/app/workspace
+      - ${WORKSPACE_PATH}:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker2@%h -c 1
     restart: unless-stopped
@@ -142,14 +145,15 @@ services:
       context: system_modules/provenance-analysis
       dockerfile: Dockerfile.api
     ports:
-      - "${PROVENANCE_SERVICE_PORT:-8002}:8000"
+      - "${PROVENANCE_SERVICE_PORT:-8002}:${PROVENANCE_SERVICE_PORT:-8000}"
     volumes:
       - ${WORKSPACE_PATH}:/workspace
       - provenance_output:/app/output
     environment:
-      - CBIR_ENDPOINT=http://cbir-service:8001
+      - CBIR_ENDPOINT=http://cbir-service:${CBIR_SERVICE_PORT:-8001}
       - PROVENANCE_OUTPUT_DIR=/app/output
       - REMOTE_DATA_PATH=/workspace
+      - PROVENANCE_SERVICE_PORT=${PROVENANCE_SERVICE_PORT:-8000}
     networks:
       - elis_network
       - milvus
@@ -254,7 +258,7 @@ services:
       context: system_modules/cbir-system
       dockerfile: docker/Dockerfile
     ports:
-      - "${CBIR_SERVICE_PORT:-8001}:8001"
+      - "${CBIR_SERVICE_PORT:-8001}:${CBIR_SERVICE_PORT:-8001}"
     volumes:
       - ./system_modules/cbir-system/src:/app/src
       - ./system_modules/cbir-system/config:/app/config
@@ -263,6 +267,7 @@ services:
     environment:
       - MILVUS_HOST=milvus-standalone
       - MODEL_DEVICE=cpu
+      - CBIR_SERVICE_PORT=${CBIR_SERVICE_PORT:-8001}
     depends_on:
       - milvus-standalone
     networks:
