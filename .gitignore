@@ -29,6 +29,7 @@ dev-venv/
 uvenv/
 env/
 ENV/
+test_env/
 .venv
 .env
 .env.local
@@ -231,3 +232,5 @@ yarn-error.log
 .env.production.local
 .env.development.local
 .env.test.local
+cbir-workspace/
+provenance-data/
