@@ -77,7 +77,7 @@ elis-system/
 
 ### Quick Start with Docker (Recommended)
 
-The easiest way to get the system running is with Docker Compose. This starts all required services automatically.
+The easiest way to get the system running is with Docker Compose. This starts all required services automatically, including the API, Database, Celery Workers, and Microservices (CBIR, Provenance).
 
 1. Clone and navigate to the repository:
 
@@ -86,16 +86,51 @@ git clone <repository-url>
 cd elis-system
 ```
 
-2. Start all services:
+2. **Build the Tool Images (First Time Only)**:
+   The system relies on several specialized Docker images for tasks like PDF extraction, watermark removal, and copy-move detection. You need to build these images first:
+
+```bash
+docker-compose --profile tools build
+```
+
+3. **Start the Main System**:
+   Start the API, Database, Workers, and Microservices:
 
 ```bash
 docker-compose up -d
 ```
 
-3. Verify services are running:
+4. **Verify Services**:
 
 ```bash
 docker-compose ps
+```
+
+### Accessing Services
+
+Once the system is running, you can access the following interfaces:
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **API Documentation** | [http://localhost:8000/docs](http://localhost:8000/docs) | Swagger UI for the Backend API |
+| **Milvus GUI (Attu)** | [http://localhost:3322](http://localhost:3322) | Visual interface for the Vector Database |
+| **Celery Monitor (Flower)** | [http://localhost:5555](http://localhost:5555) | Monitor async tasks and workers |
+| **Provenance Service** | [http://localhost:8002/docs](http://localhost:8002/docs) | API docs for the Provenance Microservice |
+| **CBIR Service** | [http://localhost:8001/docs](http://localhost:8001/docs) | API docs for the CBIR Microservice |
+| **MinIO Console** | [http://localhost:9001](http://localhost:9001) | Object storage browser (User/Pass: `minioadmin`) |
+
+### Stopping the System
+
+To stop all running services:
+
+```bash
+docker-compose down
+```
+
+To stop and remove volumes (WARNING: deletes database data):
+
+```bash
+docker-compose down -v
 ```
 
 All services will be available once running:

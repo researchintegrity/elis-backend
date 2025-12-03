@@ -73,6 +73,19 @@ CBIR_SERVICE_URL = os.getenv(
 )
 CBIR_TIMEOUT = int(os.getenv("CBIR_TIMEOUT", "120"))  # 2 minutes default
 
+# ============================================================================
+# PROVENANCE ANALYSIS SETTINGS
+# ============================================================================
+# When running inside Docker, use container name 'provenance-service'
+# When running locally, use 'localhost:8002'
+PROVENANCE_SERVICE_HOST = os.getenv("PROVENANCE_SERVICE_HOST", "localhost")
+PROVENANCE_SERVICE_PORT = int(os.getenv("PROVENANCE_SERVICE_PORT", "8002"))
+PROVENANCE_SERVICE_URL = os.getenv(
+    "PROVENANCE_SERVICE_URL",
+    f"http://{PROVENANCE_SERVICE_HOST}:{PROVENANCE_SERVICE_PORT}"
+)
+PROVENANCE_TIMEOUT = int(os.getenv("PROVENANCE_TIMEOUT", "600"))  # 10 minutes default
+
 # Extraction timeouts (in seconds)
 DOCKER_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes

@@ -760,6 +760,7 @@ class AnalysisType(str, Enum):
     CROSS_IMAGE_COPY_MOVE = "cross_image_copy_move"
     TRUFOR = "trufor"
     CBIR_SEARCH = "cbir_search"
+    PROVENANCE = "provenance"
 
 
 class AnalysisStatus(str, Enum):
@@ -795,7 +796,7 @@ class CrossImageAnalysisCreate(BaseModel):
 class AnalysisResult(BaseModel):
     """Generic analysis result container"""
     method: Optional[int] = None
-    timestamp: datetime
+    timestamp: Optional[datetime] = None
     matches_image: Optional[str] = None
     clusters_image: Optional[str] = None
     visualization: Optional[str] = None
@@ -808,6 +809,9 @@ class AnalysisResult(BaseModel):
     labels_filter: Optional[List[str]] = None
     matches_count: Optional[int] = None
     matches: Optional[List[CBIRSearchResult]] = None
+
+    class Config:
+        extra = "allow"
 
 
 class AnalysisResponse(AnalysisBase):
