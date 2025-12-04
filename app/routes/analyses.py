@@ -8,7 +8,6 @@ from app.schemas import (
     AnalysisType,
     AnalysisStatus
 )
-from app.tasks.copy_move_detection import detect_copy_move
 from app.services.resource_helpers import get_owned_resource
 from app.config.settings import resolve_workspace_path
 from datetime import datetime
