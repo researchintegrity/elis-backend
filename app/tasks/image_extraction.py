@@ -7,7 +7,7 @@ from app.celery_config import celery_app
 from app.db.mongodb import get_documents_collection, get_images_collection
 from app.utils.file_storage import figure_extraction_hook
 from app.utils.metadata_parser import parse_pdf_extraction_filename, is_pdf_extraction_filename, extract_exif_metadata
-from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_container_path_to_host
+from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_container_path_to_host, resolve_workspace_path
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -128,16 +128,11 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
                     old_path = image_file['path']
                     new_path = os.path.join(os.path.dirname(old_path), new_filename)
                     
-                    # Construct full host paths if these are container paths
-                    if not os.path.isabs(old_path):
-                        # Workspace-relative path, convert to full path
-                        old_full_path = os.path.join(
-                            os.getcwd(), old_path
-                        )
-                    else:
-                        old_full_path = old_path
-                    
+                    # Resolve workspace path properly (handles workspace/... -> /workspace/...)
+                    old_full_path = resolve_workspace_path(old_path)
                     new_full_path = os.path.join(os.path.dirname(old_full_path), new_filename)
+                    
+                    logger.debug(f"Renaming file: {old_full_path} -> {new_full_path}")
                     
                     try:
                         os.rename(old_full_path, new_full_path)

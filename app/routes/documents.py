@@ -28,6 +28,7 @@ from app.utils.file_storage import (
     update_user_storage_in_db
 )
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
+from app.config.settings import resolve_workspace_path
 from app.tasks.image_extraction import extract_images_from_document
 from app.services.watermark_removal_service import (
     initiate_watermark_removal,
@@ -125,10 +126,10 @@ async def upload_document(
         # Create extraction output directory
         get_extraction_output_path(user_id_str, doc_id)
         
-        # Convert relative path to absolute path for worker container
-        # file_path is like "workspace/user_id/pdfs/file.pdf"
-        # In worker container, this should be "/workspace/user_id/pdfs/file.pdf"
-        absolute_pdf_path = f"/{file_path}"
+        # Resolve the stored file path to absolute path for worker container
+        # file_path from save_pdf_file is already absolute (/workspace/...)
+        # We use resolve_workspace_path to handle any format consistently
+        absolute_pdf_path = resolve_workspace_path(file_path)
         
         # ✨ QUEUE IMAGE EXTRACTION TASK (asynchronous - returns immediately)
         task = extract_images_from_document.delay(
@@ -326,8 +327,9 @@ async def download_document(
         "Document"
     )
     
-    # Check if file exists
-    file_path = doc["file_path"]
+    # Check if file exists - resolve workspace path to actual filesystem path
+    stored_path = doc["file_path"]
+    file_path = resolve_workspace_path(stored_path)
     if not Path(file_path).exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

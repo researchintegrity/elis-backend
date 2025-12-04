@@ -16,6 +16,7 @@ from app.config.settings import (
 
 # Redis connection settings
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+print(f"DEBUG: REDIS_HOST in celery_config is {REDIS_HOST}")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 

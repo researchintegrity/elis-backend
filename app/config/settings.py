@@ -217,3 +217,41 @@ def convert_container_path_to_host(container_path: str) -> str:
         # Add 'workspace' prefix back to create workspace-relative path
         return "workspace" + rel_path
     return container_path
+
+
+def resolve_workspace_path(stored_path: str) -> str:
+    """
+    Resolve a stored workspace path to the actual filesystem path.
+    
+    Stored paths in the database may be in relative format like:
+    - "workspace/user_id/images/..." (relative, for portability)
+    
+    This function converts them to the actual filesystem path based on
+    the current WORKSPACE_PATH setting.
+    
+    Args:
+        stored_path: Path as stored in the database
+        
+    Returns:
+        Absolute filesystem path that can be used for file operations
+        
+    Examples:
+        workspace/user_id/images/test.jpg → /workspace/user_id/images/test.jpg
+        /workspace/user_id/images/test.jpg → /workspace/user_id/images/test.jpg (unchanged)
+    """
+    # If already an absolute container path, return as-is
+    if is_container_path(stored_path):
+        return stored_path
+    
+    # If it's a relative "workspace/..." path, convert to absolute
+    if stored_path.startswith("workspace/"):
+        # Remove "workspace/" prefix and prepend the actual workspace path
+        rel_path = stored_path[len("workspace/"):]
+        return f"{APP_WORKSPACE_PREFIX}/{rel_path}"
+    
+    # If it's some other relative path, try to resolve it
+    if not os.path.isabs(stored_path):
+        # Try prepending WORKSPACE_ROOT
+        return os.path.join(WORKSPACE_ROOT, stored_path)
+    
+    return stored_path

@@ -25,6 +25,7 @@ from app.utils.file_storage import (
 )
 from app.utils.metadata_parser import extract_exif_metadata
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
+from app.config.settings import resolve_workspace_path
 from app.services.image_service import delete_image_and_artifacts, list_images as list_images_service
 from app.services.resource_helpers import get_owned_resource
 from app.services.quota_helpers import augment_with_quota
@@ -321,12 +322,13 @@ async def download_image(
         "Image"
     )
     
-    # Check if file exists
-    file_path = img["file_path"]
+    # Check if file exists - resolve workspace path to actual filesystem path
+    stored_path = img["file_path"]
+    file_path = resolve_workspace_path(stored_path)
     if not Path(file_path).exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found on disk"
+            detail=f"File not found on disk"
         )
     
     # Determine media type from file extension
@@ -904,7 +906,7 @@ async def analyze_copy_move(
         analysis_id=analysis_id,
         image_id=image_id,
         user_id=user_id_str,
-        image_path=image["file_path"],
+        image_path=resolve_workspace_path(image["file_path"]),
         method=request.method
     )
     

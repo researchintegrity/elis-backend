@@ -10,6 +10,7 @@ from app.schemas import (
 )
 from app.tasks.copy_move_detection import detect_copy_move
 from app.services.resource_helpers import get_owned_resource
+from app.config.settings import resolve_workspace_path
 from datetime import datetime
 from bson import ObjectId
 
@@ -105,8 +106,8 @@ async def analyze_copy_move_cross(
         source_image_id=request.source_image_id,
         target_image_id=request.target_image_id,
         user_id=user_id_str,
-        source_image_path=source_image["file_path"],
-        target_image_path=target_image["file_path"],
+        source_image_path=resolve_workspace_path(source_image["file_path"]),
+        target_image_path=resolve_workspace_path(target_image["file_path"]),
         method=request.method
     )
     
@@ -159,7 +160,7 @@ async def analyze_trufor(
         analysis_id=analysis_id,
         image_id=request.image_id,
         user_id=user_id_str,
-        image_path=image["file_path"]
+        image_path=resolve_workspace_path(image["file_path"])
     )
     
     return {"message": "TruFor analysis started", "analysis_id": analysis_id}

@@ -17,7 +17,8 @@ from app.utils.file_storage import get_panel_output_path
 from app.config.settings import (
     CELERY_MAX_RETRIES, 
     CELERY_RETRY_BACKOFF_BASE,
-    convert_container_path_to_host
+    convert_container_path_to_host,
+    resolve_workspace_path
 )
 
 logger = logging.getLogger(__name__)
@@ -136,11 +137,8 @@ def extract_panels_from_images(
                     panel_doc_file = images_col.find_one({"_id": panel_mongodb_id})
                     original_file_path = panel_doc_file.get("file_path")
                     
-                    # Construct full path
-                    if not os.path.isabs(original_file_path):
-                        full_old_path = os.path.join(os.getcwd(), original_file_path)
-                    else:
-                        full_old_path = original_file_path
+                    # Resolve workspace path properly (handles workspace/... -> /workspace/...)
+                    full_old_path = resolve_workspace_path(original_file_path)
                     
                     # New filename using _id
                     file_ext = os.path.splitext(panel_doc_file.get("filename"))[1]
