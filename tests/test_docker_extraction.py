@@ -43,7 +43,7 @@ class TestDockerExtraction:
         user_id = "test_user_456"
         pdf_path = "/path/that/does/not/exist/sample.pdf"
         
-        count, errors = extract_images_with_docker(
+        count, errors, files = extract_images_with_docker(
             doc_id=doc_id,
             user_id=user_id,
             pdf_file_path=pdf_path
@@ -64,7 +64,7 @@ class TestDockerExtraction:
             with open(pdf_path, 'w') as f:
                 f.write("fake pdf content")
             
-            count, errors = extract_images_with_docker(
+            count, errors, files = extract_images_with_docker(
                 doc_id="test_doc",
                 user_id="test_user",
                 pdf_file_path=pdf_path
@@ -96,7 +96,7 @@ class TestDockerExtraction:
             with open(pdf_path, 'w') as f:
                 f.write("fake pdf content")
             
-            count, errors = extract_images_with_docker(
+            count, errors, files = extract_images_with_docker(
                 doc_id="test_doc",
                 user_id="test_user",
                 pdf_file_path=pdf_path
@@ -120,7 +120,7 @@ class TestDockerExtraction:
             with open(pdf_path, 'w') as f:
                 f.write("fake pdf content")
             
-            count, errors = extract_images_with_docker(
+            count, errors, files = extract_images_with_docker(
                 doc_id="test_doc",
                 user_id="test_user",
                 pdf_file_path=pdf_path
@@ -132,7 +132,8 @@ class TestDockerExtraction:
     
     @patch('subprocess.run')
     @patch('os.listdir')
-    def test_extract_counts_images(self, mock_listdir, mock_run):
+    @patch('os.path.getsize')
+    def test_extract_counts_images(self, mock_getsize, mock_listdir, mock_run):
         """Test that extracted images are counted correctly"""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         mock_listdir.return_value = [
@@ -142,13 +143,14 @@ class TestDockerExtraction:
             "metadata.json",  # Should not be counted
             "README.txt"      # Should not be counted
         ]
+        mock_getsize.return_value = 1024  # Mock file size
         
         with tempfile.TemporaryDirectory() as tmpdir:
             pdf_path = os.path.join(tmpdir, "test.pdf")
             with open(pdf_path, 'w') as f:
                 f.write("fake pdf content")
             
-            count, errors = extract_images_with_docker(
+            count, errors, files = extract_images_with_docker(
                 doc_id="test_doc",
                 user_id="test_user",
                 pdf_file_path=pdf_path
@@ -168,7 +170,7 @@ class TestDockerExtraction:
                 mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
                 mock_makedirs.return_value = None  # Simulate makedirs working
                 
-                count, errors = extract_images_with_docker(
+                count, errors, files = extract_images_with_docker(
                     doc_id="test_doc",
                     user_id="test_user",
                     pdf_file_path="/tmp/test.pdf"
@@ -189,9 +191,10 @@ class TestDockerExtraction:
         )
         
         assert isinstance(result, tuple)
-        assert len(result) == 2
+        assert len(result) == 3
         assert isinstance(result[0], int)
         assert isinstance(result[1], list)
+        assert isinstance(result[2], list)
     
     @patch('subprocess.run')
     def test_extract_with_custom_docker_image(self, mock_run):
@@ -203,19 +206,17 @@ class TestDockerExtraction:
             with open(pdf_path, 'w') as f:
                 f.write("fake pdf content")
             
-            custom_image = "my-registry/custom-extractor:v2"
-            count, errors = extract_images_with_docker(
+            count, errors, files = extract_images_with_docker(
                 doc_id="test_doc",
                 user_id="test_user",
                 pdf_file_path=pdf_path,
-                docker_image=custom_image
+                docker_image="custom-image:latest"
             )
             
             # Verify custom image was used
             call_args = mock_run.call_args
             docker_command = call_args[0][0]
-            
-            assert custom_image in docker_command
+            assert "custom-image:latest" in docker_command
 
 
 class TestDockerCompose:
@@ -281,7 +282,7 @@ class TestDockerIntegration:
     def test_extraction_error_handling(self):
         """Test error handling in extraction"""
         # Test with invalid parameters
-        count, errors = extract_images_with_docker(
+        count, errors, files = extract_images_with_docker(
             doc_id="",
             user_id="",
             pdf_file_path=""
@@ -361,7 +362,7 @@ def test_extraction_hook_returns_tuple():
     
     # Mock docker extraction
     with patch('app.utils.docker_extraction.extract_images_with_docker') as mock:
-        mock.return_value = (5, [])
+        mock.return_value = (5, [], [])
         
         result = figure_extraction_hook(
             doc_id="test_doc",
@@ -370,9 +371,10 @@ def test_extraction_hook_returns_tuple():
         )
         
         assert isinstance(result, tuple)
-        assert len(result) == 2
+        assert len(result) == 3
         assert isinstance(result[0], int)
         assert isinstance(result[1], list)
+        assert isinstance(result[2], list)
 
 
 if __name__ == "__main__":
