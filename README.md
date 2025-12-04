@@ -46,18 +46,22 @@ elis-system/
 │       ├── file_storage.py          # File operations
 │       ├── docker_extraction.py     # PDF extraction Docker wrapper
 │       └── docker_panel_extractor.py # Panel extraction Docker wrapper
-├── tests/                           # Test suite (28+ tests)
+├── tests/                           # Test suite (62+ tests)
 │   ├── conftest.py                  # Pytest configuration
 │   ├── test_user_operations.py      # User management tests
 │   ├── test_document_upload.py      # Document & image tests
 │   ├── test_docker_extraction.py    # Docker integration tests
 │   ├── test_panel_extraction.py     # Panel extraction unit tests
-│   └── test_panel_extraction_docker.py  # Panel extraction Docker tests
-├── system_modules/                  # External services
-│   ├── pdf-image-extraction/        # PDF extraction Docker image
-│   ├── panel-extractor/             # Panel extraction Docker image
-│   ├── watermark-removal/           # Watermark removal Docker image
-│   └── front-end-platform/          # Frontend application
+│   ├── test_panel_extraction_docker.py  # Panel extraction Docker tests
+│   └── test_panel_extraction_e2e.py # Panel extraction end-to-end tests
+├── system_modules/                  # External analysis modules
+│   ├── cbir-system/                 # Content-Based Image Retrieval
+│   ├── copy-move-detection/         # Copy-move forgery detection
+│   ├── front-end-platform/          # Frontend application
+│   ├── panel-extractor/             # Panel extraction from images
+│   ├── pdf-image-extraction/        # PDF to image extraction
+│   ├── provenance-analysis/         # Document provenance analysis
+│   └── TruFor/                      # Image manipulation detection
 ├── datasets/                        # Sample datasets for testing
 ├── docker-compose.yml               # Multi-container orchestration
 ├── Dockerfile                       # API container
@@ -66,6 +70,40 @@ elis-system/
 ├── pytest.ini                       # Pytest configuration
 └── README.md                        # This file
 ```
+
+## System Modules
+
+The ELIS system integrates several specialized analysis modules, each implemented as a separate repository in the same GitHub organization (`researchintegrity`). These modules provide the core AI/ML capabilities for scientific image and document analysis.
+
+### Available Modules
+
+- **cbir-system**: Content-Based Image Retrieval for similarity search
+- **copy-move-detection**: Detection of copy-move image forgeries
+- **copy-move-detection-keypoint**: Advanced keypoint-based copy-move detection
+- **front-end-platform**: Web-based user interface for the system
+- **panel-extractor**: YOLO-based panel extraction from scientific images
+- **pdf-image-extraction**: PDF document to image conversion
+- **provenance-analysis**: Document provenance and integrity analysis
+- **TruFor**: Image manipulation and tampering detection
+
+### Cloning Modules
+
+For development or to build custom Docker images, you can clone the individual modules into the `system_modules/` directory:
+
+```bash
+# Clone all modules (run from project root)
+cd system_modules
+git clone https://github.com/researchintegrity/cbir-system.git
+git clone https://github.com/researchintegrity/copy-move-detection.git
+git clone https://github.com/researchintegrity/copy-move-detection-keypoint.git
+git clone https://github.com/researchintegrity/front-end-platform.git
+git clone https://github.com/researchintegrity/panel-extractor.git
+git clone https://github.com/researchintegrity/pdf-image-extraction.git
+git clone https://github.com/researchintegrity/provenance-analysis.git
+git clone https://github.com/researchintegrity/TruFor.git
+```
+
+Note: The system is designed to work with pre-built Docker images for production use. Cloning modules is only necessary for development or custom builds.
 
 ## Getting Started
 
