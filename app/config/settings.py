@@ -20,7 +20,7 @@ from pathlib import Path
 
 # Base directory for all user uploads and workspace files
 # Use absolute path for workspace to avoid issues with relative paths in different contexts
-UPLOAD_DIR = Path(os.getenv("WORKSPACE_PATH", os.path.abspath("workspace")))
+UPLOAD_DIR = Path(os.getenv("CONTAINER_WORKSPACE_PATH", os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))))
 
 # ============================================================================
 # EXTRACTION SETTINGS
@@ -93,7 +93,8 @@ DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_IMAGE_CHECK_TIMEOUT = 10  # Check if image exists
 
 # Path constants
-APP_WORKSPACE_PREFIX = "/workspace"
+CONTAINER_WORKSPACE_PATH = os.getenv("CONTAINER_WORKSPACE_PATH", "/workspace")
+APP_WORKSPACE_PREFIX = CONTAINER_WORKSPACE_PATH
 EXTRACTION_SUBDIRECTORY = "images/extracted"
 
 # ============================================================================
@@ -121,7 +122,7 @@ CELERY_REDIS_SOCKET_TIMEOUT = 5
 # ============================================================================
 
 # Workspace root directory (can be overridden by environment variable)
-WORKSPACE_ROOT = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
+WORKSPACE_ROOT = os.getenv("CONTAINER_WORKSPACE_PATH", os.getenv("WORKSPACE_PATH", os.path.abspath("workspace")))
 
 # Supported image file extensions for extraction
 SUPPORTED_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.tiff', '.bmp')

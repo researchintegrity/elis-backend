@@ -16,6 +16,7 @@ from app.config.settings import (
     is_container_path,
     get_container_path_length,
     resolve_workspace_path,
+    CONTAINER_WORKSPACE_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ def extract_images_with_docker(
             f"  PDF filename: {pdf_filename}\n"
             f"  Output dir: {output_dir}\n"
             f"  is_container_path: {is_container_path(pdf_dir)}\n"
-            f"  WORKSPACE_PATH env: {os.getenv('WORKSPACE_PATH')}"
+            f"  CONTAINER_WORKSPACE_PATH: {CONTAINER_WORKSPACE_PATH}"
         )
         
         # Handle Docker running inside a container vs on the host:
@@ -121,7 +122,7 @@ def extract_images_with_docker(
         host_output_dir = output_dir
         
         # If path starts with /workspace, we're in the worker container
-        workspace_path = os.getenv("HOST_WORKSPACE_PATH")
+        host_workspace_path = os.getenv("HOST_WORKSPACE_PATH")
         container_path_len = get_container_path_length()
         
         logger.debug(f"Path analysis: container_path_len={container_path_len}, is_container={is_container_path(pdf_dir)}")
@@ -130,7 +131,7 @@ def extract_images_with_docker(
             # We're running in the worker container, need to convert paths for Docker daemon on host
             logger.info(f"Detected container environment. Converting paths for host Docker daemon")
             
-            if not workspace_path:
+            if not host_workspace_path:
                 error_msg = "HOST_WORKSPACE_PATH environment variable not set"
                 logger.error(error_msg)
                 extraction_errors.append(error_msg)
@@ -140,17 +141,17 @@ def extract_images_with_docker(
             # Example: /workspace/abc123/pdfs/file.pdf
             # Get relative path: abc123/pdfs
             rel_path = pdf_dir[container_path_len:]  # Remove /workspace prefix
-            host_pdf_dir = workspace_path + rel_path
+            host_pdf_dir = host_workspace_path + rel_path
             
             # Do the same for output directory
             rel_output = output_dir[container_path_len:]
-            host_output_dir = workspace_path + rel_output
+            host_output_dir = host_workspace_path + rel_output
             
             logger.debug(
                 f"Container path conversion:\n"
                 f"  Original PDF dir: {pdf_dir}\n"
                 f"  Relative path: {rel_path}\n"
-                f"  WORKSPACE_PATH: {workspace_path}\n"
+                f"  HOST_WORKSPACE_PATH: {host_workspace_path}\n"
                 f"  Host PDF dir: {host_pdf_dir}\n"
                 f"  Host output dir: {host_output_dir}"
             )

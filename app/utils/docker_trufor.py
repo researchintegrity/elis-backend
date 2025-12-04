@@ -13,6 +13,7 @@ from app.config.settings import (
     TRUFOR_TIMEOUT,
     TRUFOR_USE_GPU,
     resolve_workspace_path,
+    CONTAINER_WORKSPACE_PATH,
 )
 from app.utils.file_storage import get_analysis_output_path
 from app.schemas import AnalysisType
@@ -70,21 +71,21 @@ def run_trufor_detection_with_docker(
     host_image_dir = image_dir
     host_output_dir = output_dir_path
     
-    workspace_path = os.getenv("HOST_WORKSPACE_PATH")
+    host_workspace_path = os.getenv("HOST_WORKSPACE_PATH")
     container_path_len = get_container_path_length()
     
     if is_container_path(image_dir):
         logger.info(f"Detected container environment. Converting paths for host Docker daemon")
         
-        if not workspace_path:
+        if not host_workspace_path:
             return False, "HOST_WORKSPACE_PATH environment variable not set", results
         
         rel_path = image_dir[container_path_len:]
-        host_image_dir = workspace_path.rstrip('/') + '/' + rel_path.lstrip('/')
+        host_image_dir = host_workspace_path.rstrip('/') + '/' + rel_path.lstrip('/')
         
         if is_container_path(output_dir_path):
             rel_out_path = output_dir_path[container_path_len:]
-            host_output_dir = workspace_path.rstrip('/') + '/' + rel_out_path.lstrip('/')
+            host_output_dir = host_workspace_path.rstrip('/') + '/' + rel_out_path.lstrip('/')
 
     # Construct Docker command
     container_input_path = f"/data/{image_filename}"

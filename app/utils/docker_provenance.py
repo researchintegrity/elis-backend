@@ -12,6 +12,7 @@ from app.config.settings import (
     is_container_path,
     get_container_path_length,
     WORKSPACE_ROOT,
+    CONTAINER_WORKSPACE_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,17 +33,17 @@ def _convert_path_for_provenance(file_path: str) -> str:
     # If it's a container path (/workspace/...), convert to /workspace/...
     if is_container_path(file_path):
         rel_path = file_path[get_container_path_length():]  # Remove /workspace
-        return f"/workspace{rel_path}"
+        return f"{CONTAINER_WORKSPACE_PATH}{rel_path}"
     
     # If it's a workspace path (workspace/...), convert to /workspace/...
     if file_path.startswith("workspace/"):
         rel_path = file_path[len("workspace"):]  # Remove 'workspace'
-        return f"/workspace{rel_path}"
+        return f"{CONTAINER_WORKSPACE_PATH}{rel_path}"
     
     # If it's an absolute workspace path, extract relative part
     if WORKSPACE_ROOT and file_path.startswith(WORKSPACE_ROOT):
         rel_path = file_path[len(WORKSPACE_ROOT):]
-        return f"/workspace{rel_path}"
+        return f"{CONTAINER_WORKSPACE_PATH}{rel_path}"
     
     # Assume it's already in the correct format
     return file_path

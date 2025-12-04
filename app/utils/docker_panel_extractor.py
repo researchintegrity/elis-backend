@@ -17,6 +17,7 @@ from app.config.settings import (
     PANEL_EXTRACTOR_DOCKER_IMAGE,
     PANEL_EXTRACTION_DOCKER_WORKDIR,
     resolve_workspace_path,
+    CONTAINER_WORKSPACE_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,21 +145,21 @@ def extract_panels_with_docker(
             f"  Number of images: {len(image_paths)}\n"
             f"  Docker image: {docker_image}\n"
             f"  is_container_path: {is_container_path(input_dir)}\n"
-            f"  WORKSPACE_PATH env: {os.getenv('WORKSPACE_PATH')}"
+            f"  CONTAINER_WORKSPACE_PATH: {CONTAINER_WORKSPACE_PATH}"
         )
 
         # Handle Docker running inside a container vs on the host
         host_input_dir = input_dir
         host_output_dir = output_dir
 
-        workspace_path = os.getenv("HOST_WORKSPACE_PATH")
+        host_workspace_path = os.getenv("HOST_WORKSPACE_PATH")
         container_path_len = get_container_path_length()
 
         if is_container_path(input_dir):
             # We're running in the worker container, need to convert paths for Docker daemon on host
             logger.info(f"Detected container environment. Converting paths for host Docker daemon")
 
-            if not workspace_path:
+            if not host_workspace_path:
                 error_msg = "HOST_WORKSPACE_PATH environment variable not set"
                 logger.error(error_msg)
                 return False, error_msg, output_info
@@ -166,14 +167,14 @@ def extract_panels_with_docker(
             # Convert: /workspace/user_id/... → /host/path/workspace/user_id/...
             rel_input_path = input_dir[container_path_len:]
             rel_output_path = output_dir[container_path_len:]
-            host_input_dir = workspace_path + rel_input_path
-            host_output_dir = workspace_path + rel_output_path
+            host_input_dir = host_workspace_path + rel_input_path
+            host_output_dir = host_workspace_path + rel_output_path
 
             logger.debug(
                 f"Container path conversion:\n"
                 f"  Original input dir: {input_dir}\n"
                 f"  Original output dir: {output_dir}\n"
-                f"  WORKSPACE_PATH: {workspace_path}\n"
+                f"  HOST_WORKSPACE_PATH: {host_workspace_path}\n"
                 f"  Host input dir: {host_input_dir}\n"
                 f"  Host output dir: {host_output_dir}"
             )

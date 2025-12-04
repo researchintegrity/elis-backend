@@ -12,6 +12,7 @@ from app.config.settings import (
     COPY_MOVE_DETECTION_DOCKER_IMAGE,
     COPY_MOVE_DETECTION_TIMEOUT,
     resolve_workspace_path,
+    CONTAINER_WORKSPACE_PATH,
 )
 from app.utils.file_storage import get_analysis_output_path
 
@@ -91,39 +92,38 @@ def run_copy_move_detection_with_docker(
     host_output_dir = output_dir_path
     
     # If path starts with /workspace, we're in the worker container
-    workspace_path = os.getenv("HOST_WORKSPACE_PATH")
-    container_path_len = get_container_path_length()
+    host_workspace_path = os.getenv("HOST_WORKSPACE_PATH")
     
     # Check if we are running in a container environment by checking if paths start with /workspace
-    # OR if WORKSPACE_PATH env var is set (which implies we might need conversion)
-    is_container_env = is_container_path(image_dir) or (workspace_path and image_dir.startswith("/workspace"))
+    # OR if HOST_WORKSPACE_PATH env var is set (which implies we might need conversion)
+    is_container_env = is_container_path(image_dir) or (host_workspace_path and image_dir.startswith(CONTAINER_WORKSPACE_PATH))
 
     if is_container_env:
         logger.info(f"Detected container environment. Converting paths for host Docker daemon")
         
-        if not workspace_path:
-            # Fallback if WORKSPACE_PATH is not set but we detected /workspace path
+        if not host_workspace_path:
+            # Fallback if HOST_WORKSPACE_PATH is not set but we detected /workspace path
             # This might happen in tests if env var is missing but path is mocked
-            if image_dir.startswith("/workspace"):
+            if image_dir.startswith(CONTAINER_WORKSPACE_PATH):
                  return False, "HOST_WORKSPACE_PATH environment variable not set", results
         
-        if workspace_path:
+        if host_workspace_path:
              # Convert input path: /workspace/... -> /host/path/workspace/...
-             if image_dir.startswith("/workspace"):
-                 rel_path = image_dir[len("/workspace"):]
-                 host_image_dir = workspace_path.rstrip('/') + '/' + rel_path.lstrip('/')
+             if image_dir.startswith(CONTAINER_WORKSPACE_PATH):
+                 rel_path = image_dir[len(CONTAINER_WORKSPACE_PATH):]
+                 host_image_dir = host_workspace_path.rstrip('/') + '/' + rel_path.lstrip('/')
              
              if target_image_dir:
-                 if target_image_dir.startswith("/workspace"):
-                     rel_target_path = target_image_dir[len("/workspace"):]
-                     host_target_image_dir = workspace_path.rstrip('/') + '/' + rel_target_path.lstrip('/')
+                 if target_image_dir.startswith(CONTAINER_WORKSPACE_PATH):
+                     rel_target_path = target_image_dir[len(CONTAINER_WORKSPACE_PATH):]
+                     host_target_image_dir = host_workspace_path.rstrip('/') + '/' + rel_target_path.lstrip('/')
                  else:
                      pass
                      
              # Convert output path: /workspace/... -> /host/path/workspace/...
-             if output_dir_path.startswith("/workspace"):
-                 rel_output_path = output_dir_path[len("/workspace"):]
-                 host_output_dir = workspace_path.rstrip('/') + '/' + rel_output_path.lstrip('/')
+             if output_dir_path.startswith(CONTAINER_WORKSPACE_PATH):
+                 rel_output_path = output_dir_path[len(CONTAINER_WORKSPACE_PATH):]
+                 host_output_dir = host_workspace_path.rstrip('/') + '/' + rel_output_path.lstrip('/')
     
     # Ensure output directory exists (on the host/container filesystem where we are running)
     os.makedirs(output_dir_path, exist_ok=True)
