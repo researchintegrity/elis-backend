@@ -15,6 +15,7 @@ from app.config.settings import (
     IMAGE_MIME_TYPES,
     is_container_path,
     get_container_path_length,
+    resolve_workspace_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,24 +71,10 @@ def extract_images_with_docker(
     try:
         # Validate PDF file exists
         if not os.path.exists(pdf_file_path):
-            # Try to resolve relative path if it starts with workspace/
-            if pdf_file_path.startswith("workspace/"):
-                 workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-                 rel_path = pdf_file_path[len("workspace/"):]
-                 abs_path = os.path.join(workspace_root, rel_path)
-                 
-                 if os.path.exists(abs_path):
-                     pdf_file_path = abs_path
-                 else:
-                     if os.path.exists(os.path.abspath(pdf_file_path)):
-                         pdf_file_path = os.path.abspath(pdf_file_path)
-                     else:
-                         if os.path.exists(os.path.join(os.getcwd(), pdf_file_path)):
-                             pdf_file_path = os.path.join(os.getcwd(), pdf_file_path)
-                         else:
-                             error_msg = f"PDF file not found: {pdf_file_path}"
-                             logger.error(error_msg)
-                             return 0, [error_msg], []
+            # Try to resolve path using centralized utility
+            resolved_path = resolve_workspace_path(pdf_file_path)
+            if os.path.exists(resolved_path):
+                pdf_file_path = resolved_path
             else:
                 error_msg = f"PDF file not found: {pdf_file_path}"
                 logger.error(error_msg)

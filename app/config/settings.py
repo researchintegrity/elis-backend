@@ -247,7 +247,7 @@ def resolve_workspace_path(stored_path: str) -> str:
     if stored_path.startswith("workspace/"):
         # Remove "workspace/" prefix and prepend the actual workspace path
         rel_path = stored_path[len("workspace/"):]
-        return f"{APP_WORKSPACE_PREFIX}/{rel_path}"
+        return os.path.join(WORKSPACE_ROOT, rel_path)
     
     # If it's some other relative path, try to resolve it
     if not os.path.isabs(stored_path):

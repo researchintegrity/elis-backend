@@ -11,6 +11,7 @@ from app.config.settings import (
     convert_container_path_to_host,
     COPY_MOVE_DETECTION_DOCKER_IMAGE,
     COPY_MOVE_DETECTION_TIMEOUT,
+    resolve_workspace_path,
 )
 from app.utils.file_storage import get_analysis_output_path
 
@@ -47,47 +48,18 @@ def run_copy_move_detection_with_docker(
         docker_image = COPY_MOVE_DETECTION_DOCKER_IMAGE
 
     if not os.path.exists(image_path):
-        # Try to resolve relative path if it starts with workspace/
-        if image_path.startswith("workspace/"):
-             # Assuming we are in the root of the project or where workspace is accessible
-             # Try to find where workspace is located
-             workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-             # If image_path is "workspace/...", remove "workspace/" prefix and join with workspace_root
-             rel_path = image_path[len("workspace/"):]
-             abs_path = os.path.join(workspace_root, rel_path)
-             
-             if os.path.exists(abs_path):
-                 image_path = abs_path
-             else:
-                 # Try checking if we are already in a directory containing workspace
-                 if os.path.exists(os.path.abspath(image_path)):
-                     image_path = os.path.abspath(image_path)
-                 else:
-                     # Last resort: check if it's relative to CWD
-                     if os.path.exists(os.path.join(os.getcwd(), image_path)):
-                         image_path = os.path.join(os.getcwd(), image_path)
-                     else:
-                         return False, f"Source image file not found: {image_path}", results
+        # Try to resolve path using centralized utility
+        resolved_path = resolve_workspace_path(image_path)
+        if os.path.exists(resolved_path):
+            image_path = resolved_path
         else:
             return False, f"Source image file not found: {image_path}", results
     
     if target_image_path and not os.path.exists(target_image_path):
-        if target_image_path.startswith("workspace/"):
-             workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-             rel_path = target_image_path[len("workspace/"):]
-             abs_path = os.path.join(workspace_root, rel_path)
-             
-             if os.path.exists(abs_path):
-                 target_image_path = abs_path
-             else:
-                 if os.path.exists(os.path.abspath(target_image_path)):
-                     target_image_path = os.path.abspath(target_image_path)
-                 else:
-                     # Last resort: check if it's relative to CWD
-                     if os.path.exists(os.path.join(os.getcwd(), target_image_path)):
-                         target_image_path = os.path.join(os.getcwd(), target_image_path)
-                     else:
-                         return False, f"Target image file not found: {target_image_path}", results
+        # Try to resolve path using centralized utility
+        resolved_path = resolve_workspace_path(target_image_path)
+        if os.path.exists(resolved_path):
+            target_image_path = resolved_path
         else:
             return False, f"Target image file not found: {target_image_path}", results
 

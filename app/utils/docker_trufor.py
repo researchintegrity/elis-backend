@@ -12,6 +12,7 @@ from app.config.settings import (
     TRUFOR_DOCKER_IMAGE,
     TRUFOR_TIMEOUT,
     TRUFOR_USE_GPU,
+    resolve_workspace_path,
 )
 from app.utils.file_storage import get_analysis_output_path
 from app.schemas import AnalysisType
@@ -44,27 +45,10 @@ def run_trufor_detection_with_docker(
         docker_image = TRUFOR_DOCKER_IMAGE
 
     if not os.path.exists(image_path):
-        # Try to resolve relative path if it starts with workspace/
-        if image_path.startswith("workspace/"):
-             # Assuming we are in the root of the project or where workspace is accessible
-             # Try to find where workspace is located
-             workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-             # If image_path is "workspace/...", remove "workspace/" prefix and join with workspace_root
-             rel_path = image_path[len("workspace/"):]
-             abs_path = os.path.join(workspace_root, rel_path)
-             
-             if os.path.exists(abs_path):
-                 image_path = abs_path
-             else:
-                 # Try checking if we are already in a directory containing workspace
-                 if os.path.exists(os.path.abspath(image_path)):
-                     image_path = os.path.abspath(image_path)
-                 else:
-                     # Last resort: check if it's relative to CWD
-                     if os.path.exists(os.path.join(os.getcwd(), image_path)):
-                         image_path = os.path.join(os.getcwd(), image_path)
-                     else:
-                         return False, f"Source image file not found: {image_path}", results
+        # Try to resolve path using centralized utility
+        resolved_path = resolve_workspace_path(image_path)
+        if os.path.exists(resolved_path):
+            image_path = resolved_path
         else:
             return False, f"Source image file not found: {image_path}", results
     

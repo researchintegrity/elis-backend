@@ -16,6 +16,7 @@ from app.config.settings import (
     get_container_path_length,
     PANEL_EXTRACTOR_DOCKER_IMAGE,
     PANEL_EXTRACTION_DOCKER_WORKDIR,
+    resolve_workspace_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,24 +88,10 @@ def extract_panels_with_docker(
         # Validate all image files exist
         for i, path in enumerate(image_paths):
             if not os.path.exists(path):
-                # Try to resolve relative path if it starts with workspace/
-                if path.startswith("workspace/"):
-                     workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-                     rel_path = path[len("workspace/"):]
-                     abs_path = os.path.join(workspace_root, rel_path)
-                     
-                     if os.path.exists(abs_path):
-                         image_paths[i] = abs_path
-                     else:
-                         if os.path.exists(os.path.abspath(path)):
-                             image_paths[i] = os.path.abspath(path)
-                         else:
-                             if os.path.exists(os.path.join(os.getcwd(), path)):
-                                 image_paths[i] = os.path.join(os.getcwd(), path)
-                             else:
-                                 error_msg = f"Image file not found: {path}"
-                                 logger.error(error_msg)
-                                 return False, error_msg, output_info
+                # Try to resolve path using centralized utility
+                resolved_path = resolve_workspace_path(path)
+                if os.path.exists(resolved_path):
+                    image_paths[i] = resolved_path
                 else:
                     error_msg = f"Image file not found: {path}"
                     logger.error(error_msg)
