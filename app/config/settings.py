@@ -94,7 +94,6 @@ DOCKER_IMAGE_CHECK_TIMEOUT = 10  # Check if image exists
 
 # Path constants
 CONTAINER_WORKSPACE_PATH = os.getenv("CONTAINER_WORKSPACE_PATH", "/workspace")
-APP_WORKSPACE_PREFIX = CONTAINER_WORKSPACE_PATH
 EXTRACTION_SUBDIRECTORY = "images/extracted"
 
 # ============================================================================
@@ -173,7 +172,7 @@ def get_container_path_prefix() -> str:
     Returns:
         Container path prefix: /workspace
     """
-    return APP_WORKSPACE_PREFIX
+    return CONTAINER_WORKSPACE_PATH
 
 
 def is_container_path(path: str) -> bool:
@@ -186,7 +185,7 @@ def is_container_path(path: str) -> bool:
     Returns:
         True if path starts with container prefix, False otherwise
     """
-    return path.startswith(APP_WORKSPACE_PREFIX)
+    return path.startswith(CONTAINER_WORKSPACE_PATH)
 
 
 def get_container_path_length() -> int:
@@ -196,7 +195,7 @@ def get_container_path_length() -> int:
     Returns:
         Length of /workspace
     """
-    return len(APP_WORKSPACE_PREFIX)
+    return len(CONTAINER_WORKSPACE_PATH)
 
 
 def convert_container_path_to_host(container_path: str) -> str:
@@ -242,6 +241,14 @@ def resolve_workspace_path(stored_path: str) -> str:
     """
     # If already an absolute container path, return as-is
     if is_container_path(stored_path):
+        # If we are on the host (WORKSPACE_ROOT != CONTAINER_WORKSPACE_PATH), 
+        # we need to convert the container path to the host path
+        # We check if WORKSPACE_ROOT starts with CONTAINER_WORKSPACE_PATH to detect if we are in the container environment
+        # (In container, WORKSPACE_ROOT is usually /workspace, which matches CONTAINER_WORKSPACE_PATH)
+        if not str(WORKSPACE_ROOT).startswith(CONTAINER_WORKSPACE_PATH):
+             rel_path = stored_path[len(CONTAINER_WORKSPACE_PATH):].lstrip('/')
+             return os.path.join(WORKSPACE_ROOT, rel_path)
+             
         return stored_path
     
     # If it's a relative "workspace/..." path, convert to absolute

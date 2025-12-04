@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 
 # Import storage configuration
 from app.config.storage_quota import MAX_PDF_FILE_SIZE, MAX_IMAGE_FILE_SIZE, DEFAULT_USER_STORAGE_QUOTA
-from app.config.settings import EXTRACTION_SUBDIRECTORY, PDF_EXTRACTOR_DOCKER_IMAGE, UPLOAD_DIR
+from app.config.settings import (
+    EXTRACTION_SUBDIRECTORY, 
+    PDF_EXTRACTOR_DOCKER_IMAGE, 
+    UPLOAD_DIR,
+    resolve_workspace_path
+)
 
 # File size limits (in bytes) - imported from config
 MAX_PDF_SIZE = MAX_PDF_FILE_SIZE
@@ -43,7 +48,16 @@ def get_user_upload_path(user_id: str, subfolder: str = None) -> Path:
     if subfolder:
         user_path = user_path / subfolder
     
-    user_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Creating directory: {user_path} (UPLOAD_DIR={UPLOAD_DIR})")
+    try:
+        user_path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error(f"Failed to create directory {user_path}: {e}")
+        # Check if it exists and what it is
+        if user_path.exists():
+            logger.error(f"Path exists. Is dir? {user_path.is_dir()}. Is file? {user_path.is_file()}")
+        raise
+        
     return user_path
 
 
@@ -300,11 +314,16 @@ def delete_file(file_path: str) -> Tuple[bool, Optional[str]]:
         Tuple of (success, error_message)
     """
     try:
-        path = Path(file_path)
+        # Resolve path to ensure it's absolute and correct for current environment
+        resolved_path_str = resolve_workspace_path(file_path)
+        path = Path(resolved_path_str)
+        
         if path.exists():
             path.unlink()
             return True, None
         else:
+            # Log the path we tried to delete for debugging
+            logger.warning(f"File not found for deletion: {path} (original: {file_path})")
             return False, "File not found."
     except Exception as e:
         return False, f"Failed to delete file: {str(e)}"
@@ -321,11 +340,15 @@ def delete_directory(dir_path: str) -> Tuple[bool, Optional[str]]:
         Tuple of (success, error_message)
     """
     try:
-        path = Path(dir_path)
+        # Resolve path to ensure it's absolute and correct for current environment
+        resolved_path_str = resolve_workspace_path(dir_path)
+        path = Path(resolved_path_str)
+        
         if path.exists() and path.is_dir():
             shutil.rmtree(path)
             return True, None
         else:
+            logger.warning(f"Directory not found for deletion: {path} (original: {dir_path})")
             return False, "Directory not found."
     except Exception as e:
         return False, f"Failed to delete directory: {str(e)}"
