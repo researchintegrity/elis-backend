@@ -14,7 +14,6 @@ from app.config.storage_quota import MAX_PDF_FILE_SIZE, MAX_IMAGE_FILE_SIZE, DEF
 from app.config.settings import (
     PDF_EXTRACTOR_DOCKER_IMAGE, 
     UPLOAD_DIR,
-    resolve_workspace_path
 )
 
 # File size limits (in bytes) - imported from config
@@ -336,10 +335,7 @@ def delete_directory(dir_path: str) -> Tuple[bool, Optional[str]]:
         Tuple of (success, error_message)
     """
     try:
-        # Resolve path to ensure it's absolute and correct for current environment
-        # ISSUE here
         path = Path(dir_path)
-        
         if path.exists() and path.is_dir():
             shutil.rmtree(path)
             return True, None

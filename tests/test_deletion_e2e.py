@@ -5,7 +5,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from app.config.settings import convert_container_path_to_host, resolve_workspace_path
+from app.config.settings import convert_container_path_to_host
 
 # Configuration
 BASE_URL = os.getenv("API_URL", "http://localhost:8000")
@@ -105,16 +105,11 @@ def test_upload_and_delete_image(auth_token, test_image_file):
     image_id = data.get("id") or data.get("_id")
     file_path = data.get("file_path")
     
-    print(f"Uploaded Image ID: {image_id}")
-    print(f"File Path from API: {file_path}")
-    
     # 2. Verify file exists on disk
-    # We need to resolve the path because the API might return a container path or relative path
     # and we are running tests on the host.
-    resolved_path = str(convert_container_path_to_host(Path(file_path)))
-    print(f"Resolved Path on Host: {resolved_path}")    
+    file_path = str(convert_container_path_to_host(Path(file_path)))
     
-    assert os.path.exists(resolved_path), f"File should exist at {resolved_path}"
+    assert os.path.exists(file_path), f"File should exist at {file_path}"
     
     # 3. Delete Image
     del_response = requests.delete(
@@ -131,11 +126,11 @@ def test_upload_and_delete_image(auth_token, test_image_file):
     assert get_response.status_code == 404, "Image should be not found in DB"
     
     # 5. Verify Image file is removed from disk
-    assert not os.path.exists(resolved_path), f"File should be removed from {resolved_path}"
+    assert not os.path.exists(file_path), f"File should be removed from {file_path}"
     assert get_response.status_code == 404, "Image should be not found in DB"
     
     # 5. Verify file removed from disk
-    assert not os.path.exists(resolved_path), f"File should be deleted from {resolved_path}"
+    assert not os.path.exists(file_path), f"File should be deleted from {file_path}"
 
 
 def test_upload_and_delete_pdf(auth_token, test_pdf_file):
@@ -164,14 +159,11 @@ def test_upload_and_delete_pdf(auth_token, test_pdf_file):
     doc_id = data.get("id") or data.get("_id")
     file_path = data.get("file_path")
     
-    print(f"Uploaded PDF ID: {doc_id}")
-    print(f"File Path from API: {file_path}")
     
     # 2. Verify file exists on disk
-    resolved_path = str(convert_container_path_to_host(Path(file_path)))
-    print(f"Resolved Path on Host: {resolved_path}")
+    file_path = str(convert_container_path_to_host(Path(file_path)))
     
-    assert os.path.exists(resolved_path), f"File should exist at {resolved_path}"
+    assert os.path.exists(file_path), f"File should exist at {file_path}"
     
     # 3. Delete PDF
     del_response = requests.delete(
@@ -188,4 +180,4 @@ def test_upload_and_delete_pdf(auth_token, test_pdf_file):
     assert get_response.status_code == 404, "Document should be not found in DB"
     
     # 5. Verify PDF file is removed from disk
-    assert not os.path.exists(resolved_path), f"File should be removed from {resolved_path}"
+    assert not os.path.exists(file_path), f"File should be removed from {file_path}"
