@@ -7,8 +7,6 @@ without requiring the actual CBIR microservice to be running.
 from unittest.mock import patch, MagicMock
 
 from app.utils.docker_cbir import (
-    _convert_path_for_cbir,
-    _convert_cbir_path_to_response,
     check_cbir_health,
     index_image,
     index_images_batch,
@@ -19,37 +17,7 @@ from app.utils.docker_cbir import (
     delete_user_data,
     check_images_indexed,
 )
-
-
-class TestPathConversion:
-    """Test path conversion utilities"""
-    
-    def test_convert_path_for_cbir(self):
-        """Test converting container path (/workspace/...) to CBIR format"""
-        # Test container path
-        container_path = "/workspace/user123/images/test.jpg"
-        result = _convert_path_for_cbir(container_path)
-        assert result == "/workspace/user123/images/test.jpg"
-    
-    def test_convert_workspace_path_to_cbir(self):
-        """Test converting workspace path (workspace/...) to CBIR format"""
-        workspace_path = "workspace/user123/images/test.jpg"
-        result = _convert_path_for_cbir(workspace_path)
-        assert result == "/workspace/user123/images/test.jpg"
-    
-    def test_convert_cbir_path_to_response(self):
-        """Test converting CBIR path back to backend format"""
-        cbir_path = "/workspace/user123/images/test.jpg"
-        result = _convert_cbir_path_to_response(cbir_path, "user123")
-        assert result == "workspace/user123/images/test.jpg"
-    
-    def test_path_already_in_cbir_format(self):
-        """Test path that's already in CBIR format passes through"""
-        cbir_path = "/workspace/user123/images/test.jpg"
-        result = _convert_path_for_cbir(cbir_path)
-        # Should remain unchanged or be converted consistently
-        assert "/workspace/" in result
-
+from app.config.settings import HOST_WORKSPACE_PATH, CONTAINER_WORKSPACE_PATH
 
 class TestCBIRHealthCheck:
     """Test CBIR health check functionality"""
@@ -105,7 +73,7 @@ class TestIndexImage:
         
         success, message, data = index_image(
             user_id="user123",
-            image_path="/workspace/user123/images/test.jpg",
+            image_path=f"{CONTAINER_WORKSPACE_PATH}/user123/images/test.jpg",
             labels=["Western Blot"]
         )
         
@@ -128,7 +96,7 @@ class TestIndexImage:
         
         success, message, data = index_image(
             user_id="user123",
-            image_path="/workspace/user123/images/missing.jpg"
+            image_path=f"{CONTAINER_WORKSPACE_PATH}/user123/images/missing.jpg"
         )
         
         assert success is False
@@ -152,9 +120,9 @@ class TestBatchIndexing:
         mock_post.return_value = mock_response
         
         items = [
-            {"image_path": "/path/to/img1.jpg", "labels": ["Label1"]},
-            {"image_path": "/path/to/img2.jpg", "labels": ["Label2"]},
-            {"image_path": "/path/to/img3.jpg", "labels": []}
+            {"image_path": f"{HOST_WORKSPACE_PATH}/user123/images/img1.jpg", "labels": ["Label1"]},
+            {"image_path": f"{HOST_WORKSPACE_PATH}/user123/images/img2.jpg", "labels": ["Label2"]},
+            {"image_path": f"{HOST_WORKSPACE_PATH}/user123/images/img3.jpg", "labels": []}
         ]
         
         success, message, data = index_images_batch("user123", items)
@@ -177,14 +145,14 @@ class TestSearchSimilarImages:
                     "id": 1,
                     "distance": 0.1,
                     "user_id": "user123",
-                    "image_path": "/workspace/user123/images/similar1.jpg",
+                    "image_path": f"{CONTAINER_WORKSPACE_PATH}/user123/images/similar1.jpg",
                     "labels": ["Western Blot"]
                 },
                 {
                     "id": 2,
                     "distance": 0.2,
                     "user_id": "user123",
-                    "image_path": "/workspace/user123/images/similar2.jpg",
+                    "image_path": f"{CONTAINER_WORKSPACE_PATH}/user123/images/similar2.jpg",
                     "labels": []
                 }
             ]
@@ -193,7 +161,7 @@ class TestSearchSimilarImages:
         
         success, message, results = search_similar_images(
             user_id="user123",
-            image_path="/workspace/user123/images/query.jpg",
+            image_path=f"{CONTAINER_WORKSPACE_PATH}/user123/images/query.jpg",
             top_k=10
         )
         
@@ -201,7 +169,7 @@ class TestSearchSimilarImages:
         assert len(results) == 2
         assert results[0]["distance"] == 0.1
         # Check path conversion
-        assert results[0]["image_path"].startswith("workspace/")
+        assert results[0]["image_path"].startswith(f"{CONTAINER_WORKSPACE_PATH}")
     
     @patch('app.utils.docker_cbir.requests.post')
     def test_search_with_labels_filter(self, mock_post):
@@ -213,7 +181,7 @@ class TestSearchSimilarImages:
         
         success, message, results = search_similar_images(
             user_id="user123",
-            image_path="/workspace/user123/images/query.jpg",
+            image_path=f"{CONTAINER_WORKSPACE_PATH}/user123/images/query.jpg",
             top_k=5,
             labels=["Western Blot", "Microscopy"]
         )
@@ -240,7 +208,7 @@ class TestSearchByUpload:
                     "id": 1,
                     "distance": 0.15,
                     "user_id": "user123",
-                    "image_path": "/workspace/user123/images/match.jpg",
+                    "image_path": f"{CONTAINER_WORKSPACE_PATH}/user123/images/match.jpg",
                     "labels": []
                 }
             ]
@@ -274,7 +242,7 @@ class TestDeleteOperations:
         
         success, message = delete_image_from_index(
             user_id="user123",
-            image_path="/workspace/user123/images/to_delete.jpg"
+            image_path=f"{CONTAINER_WORKSPACE_PATH}/user123/images/to_delete.jpg"
         )
         
         assert success is True
@@ -288,9 +256,9 @@ class TestDeleteOperations:
         mock_post.return_value = mock_response
         
         paths = [
-            "/workspace/user123/images/img1.jpg",
-            "/workspace/user123/images/img2.jpg",
-            "/workspace/user123/images/img3.jpg"
+            f"{CONTAINER_WORKSPACE_PATH}/user123/images/img1.jpg",
+            f"{CONTAINER_WORKSPACE_PATH}/user123/images/img2.jpg",
+            f"{CONTAINER_WORKSPACE_PATH}/user123/images/img3.jpg"
         ]
         
         success, message, data = delete_images_batch("user123", paths)
@@ -321,9 +289,9 @@ class TestCheckImagesIndexed:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "visibility": {
-                "/workspace/user123/images/img1.jpg": True,
-                "/workspace/user123/images/img2.jpg": False,
-                "/workspace/user123/images/img3.jpg": True
+                f"{CONTAINER_WORKSPACE_PATH}/user123/images/img1.jpg": True,
+                f"{CONTAINER_WORKSPACE_PATH}/user123/images/img2.jpg": False,
+                f"{CONTAINER_WORKSPACE_PATH}/user123/images/img3.jpg": True
             },
             "total_checked": 3,
             "indexed_count": 2
@@ -331,9 +299,9 @@ class TestCheckImagesIndexed:
         mock_post.return_value = mock_response
         
         paths = [
-            "/workspace/user123/images/img1.jpg",
-            "/workspace/user123/images/img2.jpg",
-            "/workspace/user123/images/img3.jpg"
+            f"{CONTAINER_WORKSPACE_PATH}/user123/images/img1.jpg",
+            f"{CONTAINER_WORKSPACE_PATH}/user123/images/img2.jpg",
+            f"{CONTAINER_WORKSPACE_PATH}/user123/images/img3.jpg"
         ]
         
         success, message, visibility = check_images_indexed("user123", paths)
