@@ -1,6 +1,7 @@
 """
 File storage utilities for document and image upload handling
 """
+import random
 import shutil
 import logging
 from pathlib import Path
@@ -102,7 +103,7 @@ def get_analysis_output_path(user_id: str, analysis_id: str, analysis_type: str)
     Get the path where analysis results should be saved
     
     Results are saved to:
-    /workspace/{user_id}/analyses/{analysis_type}/{analysis_id}/
+    <workspace-env>/{user_id}/analyses/{analysis_type}/{analysis_id}/
     
     Args:
         user_id: User ID
@@ -126,20 +127,6 @@ def get_analysis_output_path(user_id: str, analysis_id: str, analysis_type: str)
     analysis_path.mkdir(parents=True, exist_ok=True)
     return analysis_path
 
-def get_cmfd_output_path(user_id: str, image_id: str, method: int = None) -> Path:
-    """
-    DEPRECATED: Use get_analysis_output_path instead.
-    Get the path where copy-move detection results should be saved
-    """
-    if method:
-        cmfd_path = UPLOAD_DIR / user_id / "analyses" / "cmfd" / str(method) / image_id
-    else:
-        cmfd_path = UPLOAD_DIR / user_id / "analyses" / "cmfd" / image_id
-        
-    cmfd_path.mkdir(parents=True, exist_ok=True)
-    return cmfd_path
-
-
 def generate_unique_filename(original_filename: str, prefix: str = None) -> str:
     """
     Generate a unique filename with timestamp and optional prefix
@@ -151,14 +138,15 @@ def generate_unique_filename(original_filename: str, prefix: str = None) -> str:
     Returns:
         Unique filename with extension preserved
     """
-    timestamp = int(datetime.now().timestamp())
+    # add a random value to avoid collisions
+    random_value = int(datetime.now().timestamp()) + random.randint(0, 9999)
     file_ext = Path(original_filename).suffix.lower()
     base_name = Path(original_filename).stem
     
     if prefix:
-        filename = f"{prefix}_{timestamp}_{base_name}{file_ext}"
+        filename = f"{prefix}_{random_value}_{base_name}{file_ext}"
     else:
-        filename = f"{timestamp}_{base_name}{file_ext}"
+        filename = f"{random_value}_{base_name}{file_ext}"
     
     return filename
 

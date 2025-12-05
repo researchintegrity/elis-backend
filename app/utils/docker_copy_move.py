@@ -5,14 +5,16 @@ import subprocess
 import os
 import logging
 from typing import Tuple, Dict
+from pathlib import Path
 from app.config.settings import (
+    ensure_container_path,
     is_container_path,
-    get_container_path_length,
     convert_container_path_to_host,
     COPY_MOVE_DETECTION_DOCKER_IMAGE,
     COPY_MOVE_DETECTION_TIMEOUT,
     resolve_workspace_path,
     CONTAINER_WORKSPACE_PATH,
+    HOST_WORKSPACE_PATH
 )
 from app.utils.file_storage import get_analysis_output_path
 
@@ -49,20 +51,10 @@ def run_copy_move_detection_with_docker(
         docker_image = COPY_MOVE_DETECTION_DOCKER_IMAGE
 
     if not os.path.exists(image_path):
-        # Try to resolve path using centralized utility
-        resolved_path = resolve_workspace_path(image_path)
-        if os.path.exists(resolved_path):
-            image_path = resolved_path
-        else:
-            return False, f"Source image file not found: {image_path}", results
+        return False, f"Source image file not found: {image_path}", results
     
     if target_image_path and not os.path.exists(target_image_path):
-        # Try to resolve path using centralized utility
-        resolved_path = resolve_workspace_path(target_image_path)
-        if os.path.exists(resolved_path):
-            target_image_path = resolved_path
-        else:
-            return False, f"Target image file not found: {target_image_path}", results
+        return False, f"Target image file not found: {target_image_path}", results
 
     # Ensure absolute path for correct container path detection
     image_path = os.path.abspath(image_path)
@@ -91,39 +83,28 @@ def run_copy_move_detection_with_docker(
     host_target_image_dir = target_image_dir
     host_output_dir = output_dir_path
     
-    # If path starts with /workspace, we're in the worker container
-    host_workspace_path = os.getenv("HOST_WORKSPACE_PATH")
-    
-    # Check if we are running in a container environment by checking if paths start with /workspace
-    # OR if HOST_WORKSPACE_PATH env var is set (which implies we might need conversion)
-    is_container_env = is_container_path(image_dir) or (host_workspace_path and image_dir.startswith(CONTAINER_WORKSPACE_PATH))
-
+    # Check if we are running in a container environment
+    #  OR if HOST_WORKSPACE_PATH env var is set (which implies we might need conversion)
+    is_container_env = is_container_path(Path(image_dir)) or (str(HOST_WORKSPACE_PATH) and image_dir.startswith(str(CONTAINER_WORKSPACE_PATH)))
     if is_container_env:
         logger.info(f"Detected container environment. Converting paths for host Docker daemon")
         
-        if not host_workspace_path:
+        if not str(HOST_WORKSPACE_PATH):
             # Fallback if HOST_WORKSPACE_PATH is not set but we detected /workspace path
             # This might happen in tests if env var is missing but path is mocked
-            if image_dir.startswith(CONTAINER_WORKSPACE_PATH):
+            if image_dir.startswith(str(CONTAINER_WORKSPACE_PATH)):
                  return False, "HOST_WORKSPACE_PATH environment variable not set", results
         
-        if host_workspace_path:
-             # Convert input path: /workspace/... -> /host/path/workspace/...
-             if image_dir.startswith(CONTAINER_WORKSPACE_PATH):
-                 rel_path = image_dir[len(CONTAINER_WORKSPACE_PATH):]
-                 host_image_dir = host_workspace_path.rstrip('/') + '/' + rel_path.lstrip('/')
-             
-             if target_image_dir:
-                 if target_image_dir.startswith(CONTAINER_WORKSPACE_PATH):
-                     rel_target_path = target_image_dir[len(CONTAINER_WORKSPACE_PATH):]
-                     host_target_image_dir = host_workspace_path.rstrip('/') + '/' + rel_target_path.lstrip('/')
-                 else:
-                     pass
+        # Convert image_dir container paths to host paths
+        if is_container_path(Path(image_dir)):
+            host_image_dir = str(convert_container_path_to_host(Path(image_dir)))
+        
+        if target_image_dir and is_container_path(Path(target_image_dir)):
+            host_target_image_dir = str(convert_container_path_to_host(Path(target_image_dir)))
                      
-             # Convert output path: /workspace/... -> /host/path/workspace/...
-             if output_dir_path.startswith(CONTAINER_WORKSPACE_PATH):
-                 rel_output_path = output_dir_path[len(CONTAINER_WORKSPACE_PATH):]
-                 host_output_dir = host_workspace_path.rstrip('/') + '/' + rel_output_path.lstrip('/')
+        # Convert output path from container to host
+        if is_container_path(Path(output_dir_path)):
+            host_output_dir = str(convert_container_path_to_host(Path(output_dir_path)))
     
     # Ensure output directory exists (on the host/container filesystem where we are running)
     os.makedirs(output_dir_path, exist_ok=True)
@@ -197,12 +178,12 @@ def run_copy_move_detection_with_docker(
         clusters_path = os.path.join(output_dir_path, clusters_filename)
         
         if os.path.exists(matches_path):
-            # Convert absolute container path to relative workspace path
-            # e.g. /workspace/user/cmfd/img.png -> workspace/user/cmfd/img.png
-            results['matches_image'] = convert_container_path_to_host(matches_path)
+            # Convert host path to container path
+            results['matches_image'] = str(ensure_container_path(matches_path))
         
         if os.path.exists(clusters_path):
-            results['clusters_image'] = convert_container_path_to_host(clusters_path)
+            # Convert host path to container path
+            results['clusters_image'] = str(ensure_container_path(clusters_path))
             
         if not results:
              return False, "Analysis completed but no output files were found.", results
