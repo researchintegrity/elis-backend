@@ -3,7 +3,6 @@ Celery configuration for async task processing
 """
 from celery import Celery
 import os
-from datetime import timedelta
 from app.config.settings import (
     CELERY_TASK_TIME_LIMIT,
     CELERY_TASK_SOFT_TIME_LIMIT,
@@ -16,7 +15,6 @@ from app.config.settings import (
 
 # Redis connection settings
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-print(f"DEBUG: REDIS_HOST in celery_config is {REDIS_HOST}")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 

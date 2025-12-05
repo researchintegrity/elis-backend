@@ -219,49 +219,6 @@ class TestDockerExtraction:
             assert "custom-image:latest" in docker_command
 
 
-class TestDockerCompose:
-    """Test Docker Compose extraction functionality"""
-    
-    @patch('subprocess.run')
-    def test_docker_compose_command_structure(self, mock_run):
-        """Test that Docker Compose command is structured correctly"""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            pdf_path = os.path.join(tmpdir, "test.pdf")
-            with open(pdf_path, 'w') as f:
-                f.write("fake pdf content")
-            
-            count, errors = extract_images_with_docker_compose(
-                doc_id="test_doc",
-                user_id="test_user",
-                pdf_file_path=pdf_path
-            )
-            
-            # Verify Docker Compose command was called
-            mock_run.assert_called_once()
-            
-            # Get the actual command
-            call_args = mock_run.call_args
-            compose_command = call_args[0][0]
-            
-            # Verify command structure
-            assert compose_command[0] == "docker-compose"
-            assert compose_command[1] == "run"
-            assert "--rm" in compose_command
-    
-    def test_docker_compose_with_missing_pdf(self):
-        """Test Docker Compose with non-existent PDF"""
-        count, errors = extract_images_with_docker_compose(
-            doc_id="test_doc",
-            user_id="test_user",
-            pdf_file_path="/path/that/does/not/exist.pdf"
-        )
-        
-        assert count == 0
-        assert len(errors) > 0
-
-
 class TestDockerIntegration:
     """Integration tests for Docker extraction with the system"""
     

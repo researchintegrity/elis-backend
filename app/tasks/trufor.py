@@ -6,7 +6,7 @@ from app.celery_config import celery_app
 from app.db.mongodb import get_analyses_collection
 from app.utils.docker_trufor import run_trufor_detection_with_docker
 from app.config.settings import CELERY_MAX_RETRIES
-from app.schemas import AnalysisStatus, AnalysisType
+from app.schemas import AnalysisStatus
 from bson import ObjectId
 from datetime import datetime
 import logging

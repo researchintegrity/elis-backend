@@ -3,6 +3,7 @@ Document service for handling document operations
 Provides business logic for document CRUD operations
 """
 
+from pathlib import Path
 from bson import ObjectId
 from app.db.mongodb import (
     get_documents_collection,
@@ -56,13 +57,17 @@ async def delete_document_and_artifacts(
         raise ValueError("Document not found")
     
     # Delete PDF file from disk
+    
     success, error = delete_file(doc["file_path"])
+   
+
     if not success:
         raise Exception(f"Failed to delete PDF file: {error}")
     
+    
     # Delete extraction directory
-    extraction_dir = f"workspace/{user_id}/images/extracted/{document_id}"
-    success, error = delete_directory(extraction_dir)
+    extraction_dir = Path(doc["file_path"]).parent.parent / Path(f"images/extracted/{document_id}")
+    success, error = delete_directory(str(extraction_dir))
     # Note: Directory might not exist, that's OK - we still proceed with DB cleanup
     if not success and "Directory not found" not in error:
         raise Exception(f"Failed to delete extraction directory: {error}")

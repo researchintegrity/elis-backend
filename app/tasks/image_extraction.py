@@ -1,17 +1,17 @@
 """
 Image extraction tasks for async processing
 """
-from celery import current_task
 from celery.exceptions import SoftTimeLimitExceeded
 from app.celery_config import celery_app
 from app.db.mongodb import get_documents_collection, get_images_collection
 from app.utils.file_storage import figure_extraction_hook
 from app.utils.metadata_parser import parse_pdf_extraction_filename, is_pdf_extraction_filename, extract_exif_metadata
-from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_container_path_to_host, resolve_workspace_path
+from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_host_path_to_container
 from bson import ObjectId
 from datetime import datetime
 import logging
-import os
+from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
         
         logger.info(
             f"Extraction completed for doc_id={doc_id}: "
-            f"extracted={extracted_count}, errors={len(extraction_errors)}"
+            f"extracted={extracted_count}, errors={len(extraction_errors)}\n"
         )
         
         # Store individual image records in images collection
@@ -121,21 +121,21 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
                     image_id = result.inserted_id
                     logger.debug(f"Inserted image document with _id={image_id}")
                     
-                    # Rename file to use MongoDB _id
-                    file_ext = os.path.splitext(image_file['filename'])[1]
-                    new_filename = f"{image_id}{file_ext}"
+                    # The extracted images contains the bbox of their location in the PDF,
+                    # we will rename each image to its MongoDB _id for uniqueness
                     
-                    old_path = image_file['path']
-                    new_path = os.path.join(os.path.dirname(old_path), new_filename)
+                    file_ext = Path(image_file['filename']).suffix
+                    new_filename = Path(image_file['filename']).with_name(f"{image_id}{file_ext}")
                     
-                    # Resolve workspace path properly (handles workspace/... -> /workspace/...)
-                    old_full_path = resolve_workspace_path(old_path)
-                    new_full_path = os.path.join(os.path.dirname(old_full_path), new_filename)
+                    old_path = Path(image_file['path'])
                     
-                    logger.debug(f"Renaming file: {old_full_path} -> {new_full_path}")
+                    if not old_path.is_absolute():
+                        old_path = Path.cwd() / old_path
                     
+                    new_path = old_path.parent / new_filename
+
                     try:
-                        os.rename(old_full_path, new_full_path)
+                        old_path.rename(new_path)
                         logger.info(f"Renamed {original_filename} to {new_filename}")
                     except OSError as e:
                         logger.error(
@@ -149,29 +149,27 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
                         )
                         continue
                     
-                    # Update MongoDB with new filename and workspace-relative path
-                    workspace_relative_path = convert_container_path_to_host(
-                        os.path.join(os.path.dirname(image_file['path']), new_filename)
-                    )
+                    # Update MongoDB with new filename 
+                    file_storage_path = convert_host_path_to_container(new_path)
                     
                     images_col.update_one(
                         {"_id": image_id},
                         {
                             "$set": {
-                                "filename": new_filename,
-                                "file_path": workspace_relative_path
+                                "filename": str(new_filename),
+                                "file_path": str(file_storage_path)
                             }
                         }
                     )
                     logger.debug(
                         f"Updated MongoDB: filename={new_filename}, "
-                        f"file_path={workspace_relative_path}"
+                        f"file_path={file_storage_path}"
                     )
                     
                     # Add the MongoDB _id to the extracted file info for later reference
                     image_file['mongodb_id'] = str(image_id)
-                    image_file['filename'] = new_filename
-                    image_file['path'] = workspace_relative_path
+                    image_file['filename'] = str(new_filename)
+                    image_file['path'] = str(file_storage_path)
                     extracted_files_with_ids.append(image_file)
 
                     # Extract EXIF metadata and update MongoDB

@@ -234,3 +234,4 @@ yarn-error.log
 .env.test.local
 cbir-workspace/
 provenance-data/
+tests/local-tests/

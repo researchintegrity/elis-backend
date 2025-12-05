@@ -28,7 +28,7 @@ from app.utils.file_storage import (
     update_user_storage_in_db
 )
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
-from app.config.settings import resolve_workspace_path
+from app.config.settings import convert_host_path_to_container
 from app.tasks.image_extraction import extract_images_from_document
 from app.services.watermark_removal_service import (
     initiate_watermark_removal,
@@ -123,19 +123,46 @@ async def upload_document(
         result = documents_col.insert_one(doc_data)
         doc_id = str(result.inserted_id)
         
+        # Rename file to use MongoDB _id
+        new_filename = Path(f"{doc_id}.pdf")
+        
+        # Construct full paths using pathlib
+        old_path = Path(file_path)
+        if not old_path.is_absolute():
+            old_path = Path.cwd() / old_path
+        
+        new_full_path = old_path.parent / new_filename
+        
+        try:
+            old_path.rename(new_full_path)
+        except OSError as e:
+            # Delete MongoDB doc since we can't rename the file
+            documents_col.delete_one({"_id": ObjectId(doc_id)})
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to rename uploaded file: {str(e)}"
+            )
+        
+        # Update MongoDB with new filename with container-compatible path
+        file_path = Path(file_path).parent / new_filename
+        storage_path = convert_host_path_to_container(file_path)
+        documents_col.update_one(
+            {"_id": ObjectId(doc_id)},
+            {
+                "$set": {
+                    "file_path": str(storage_path)
+                }
+            }
+        )
+        
         # Create extraction output directory
         get_extraction_output_path(user_id_str, doc_id)
-        
-        # Resolve the stored file path to absolute path for worker container
-        # file_path from save_pdf_file is already absolute (/workspace/...)
-        # We use resolve_workspace_path to handle any format consistently
-        absolute_pdf_path = resolve_workspace_path(file_path)
         
         # ✨ QUEUE IMAGE EXTRACTION TASK (asynchronous - returns immediately)
         task = extract_images_from_document.delay(
             doc_id=doc_id,
             user_id=user_id_str,
-            pdf_path=absolute_pdf_path
+            pdf_path=str(storage_path)
         )
         
         # Store task_id in document for status checking
@@ -147,6 +174,9 @@ async def upload_document(
         # Retrieve and return updated document with quota info
         doc_record = documents_col.find_one({"_id": ObjectId(doc_id)})
         doc_record["_id"] = doc_id  # Ensure _id is set for response
+
+
+
         
         # Add quota information to response
         doc_record = augment_with_quota(doc_record, user_id_str, user_quota)
@@ -327,9 +357,8 @@ async def download_document(
         "Document"
     )
     
-    # Check if file exists - resolve workspace path to actual filesystem path
-    stored_path = doc["file_path"]
-    file_path = resolve_workspace_path(stored_path)
+    # Check if file exists
+    file_path = doc["file_path"]
     if not Path(file_path).exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

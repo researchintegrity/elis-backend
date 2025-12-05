@@ -6,7 +6,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from app.celery_config import celery_app
 from app.db.mongodb import get_documents_collection, get_images_collection
 from app.utils.docker_watermark import remove_watermark_with_docker
-from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE
+from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_host_path_to_container
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -21,7 +21,7 @@ def remove_watermark_from_document(
     doc_id: str,
     user_id: str,
     pdf_path: str,
-    aggressiveness_mode: int = 2
+    aggressiveness_mode: int = 1
 ):
     """
     Remove watermark from PDF document asynchronously
@@ -78,7 +78,7 @@ def remove_watermark_from_document(
             watermark_status = "completed"
             
             # Get file size of cleaned PDF
-            output_file_path = output_file_info.get("path")
+            output_file_path = str(convert_host_path_to_container(output_file_info.get("path")))
             output_file_size = output_file_info.get("size", 0)
             output_filename = output_file_info.get("filename")
             
@@ -96,7 +96,7 @@ def remove_watermark_from_document(
                 "file_size": output_file_size,
                 "original_document_id": doc_id,
                 "watermark_removal_mode": aggressiveness_mode,
-                "extraction_status": "pending",  # Can be extracted later if needed
+                "extraction_status": "images not extracted - watermark removed",
                 "extracted_image_count": 0,
                 "extraction_errors": [],
                 "uploaded_date": datetime.utcnow(),

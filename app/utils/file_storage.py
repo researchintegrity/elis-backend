@@ -1,6 +1,7 @@
 """
 File storage utilities for document and image upload handling
 """
+import random
 import shutil
 import logging
 from pathlib import Path
@@ -11,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 # Import storage configuration
 from app.config.storage_quota import MAX_PDF_FILE_SIZE, MAX_IMAGE_FILE_SIZE, DEFAULT_USER_STORAGE_QUOTA
-from app.config.settings import EXTRACTION_SUBDIRECTORY, PDF_EXTRACTOR_DOCKER_IMAGE, UPLOAD_DIR
+from app.config.settings import (
+    PDF_EXTRACTOR_DOCKER_IMAGE, 
+    UPLOAD_DIR,
+)
 
 # File size limits (in bytes) - imported from config
 MAX_PDF_SIZE = MAX_PDF_FILE_SIZE
@@ -24,7 +28,7 @@ ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 
 def ensure_directories_exist():
     """Ensure all required directories exist"""
-    UPLOAD_DIR.mkdir(exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_user_upload_path(user_id: str, subfolder: str = None) -> Path:
@@ -43,7 +47,15 @@ def get_user_upload_path(user_id: str, subfolder: str = None) -> Path:
     if subfolder:
         user_path = user_path / subfolder
     
-    user_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Creating directory: {user_path} (UPLOAD_DIR={UPLOAD_DIR})")
+    try:
+        user_path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error(f"Failed to create directory {user_path}: {e}")
+        # Check if it exists and what it is
+        if user_path.exists():
+            logger.error(f"Path exists. Is dir? {user_path.is_dir()}. Is file? {user_path.is_file()}")
+        raise
     return user_path
 
 
@@ -91,7 +103,7 @@ def get_analysis_output_path(user_id: str, analysis_id: str, analysis_type: str)
     Get the path where analysis results should be saved
     
     Results are saved to:
-    /workspace/{user_id}/analyses/{analysis_type}/{analysis_id}/
+    <workspace-env>/{user_id}/analyses/{analysis_type}/{analysis_id}/
     
     Args:
         user_id: User ID
@@ -115,20 +127,6 @@ def get_analysis_output_path(user_id: str, analysis_id: str, analysis_type: str)
     analysis_path.mkdir(parents=True, exist_ok=True)
     return analysis_path
 
-def get_cmfd_output_path(user_id: str, image_id: str, method: int = None) -> Path:
-    """
-    DEPRECATED: Use get_analysis_output_path instead.
-    Get the path where copy-move detection results should be saved
-    """
-    if method:
-        cmfd_path = UPLOAD_DIR / user_id / "analyses" / "cmfd" / str(method) / image_id
-    else:
-        cmfd_path = UPLOAD_DIR / user_id / "analyses" / "cmfd" / image_id
-        
-    cmfd_path.mkdir(parents=True, exist_ok=True)
-    return cmfd_path
-
-
 def generate_unique_filename(original_filename: str, prefix: str = None) -> str:
     """
     Generate a unique filename with timestamp and optional prefix
@@ -140,14 +138,15 @@ def generate_unique_filename(original_filename: str, prefix: str = None) -> str:
     Returns:
         Unique filename with extension preserved
     """
-    timestamp = int(datetime.now().timestamp())
+    # add a random value to avoid collisions
+    random_value = int(datetime.now().timestamp()) + random.randint(0, 9999)
     file_ext = Path(original_filename).suffix.lower()
     base_name = Path(original_filename).stem
     
     if prefix:
-        filename = f"{prefix}_{timestamp}_{base_name}{file_ext}"
+        filename = f"{prefix}_{random_value}_{base_name}{file_ext}"
     else:
-        filename = f"{timestamp}_{base_name}{file_ext}"
+        filename = f"{random_value}_{base_name}{file_ext}"
     
     return filename
 
@@ -301,10 +300,13 @@ def delete_file(file_path: str) -> Tuple[bool, Optional[str]]:
     """
     try:
         path = Path(file_path)
+        
         if path.exists():
             path.unlink()
             return True, None
         else:
+            # Log the path we tried to delete for debugging
+            logger.warning(f"File not found for deletion: {path} (original: {file_path})")
             return False, "File not found."
     except Exception as e:
         return False, f"Failed to delete file: {str(e)}"
@@ -326,6 +328,7 @@ def delete_directory(dir_path: str) -> Tuple[bool, Optional[str]]:
             shutil.rmtree(path)
             return True, None
         else:
+            logger.warning(f"Directory not found for deletion: {path} (original: {dir_path})")
             return False, "Directory not found."
     except Exception as e:
         return False, f"Failed to delete directory: {str(e)}"

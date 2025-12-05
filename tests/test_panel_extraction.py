@@ -11,11 +11,8 @@ Tests cover:
 import pytest
 import tempfile
 import os
-import csv
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 from bson import ObjectId
-from io import StringIO
 
 # Import modules to test
 import sys
@@ -24,10 +21,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 from schemas import (
     ImageResponse,
     PanelExtractionRequest,
-    PanelExtractionInitiationResponse,
     PanelExtractionStatusResponse,
 )
-from utils.docker_panel_extractor import extract_panels_with_docker, _parse_panels_csv
+from utils.docker_panel_extractor import _parse_panels_csv
 
 
 class TestSchemasValidation:

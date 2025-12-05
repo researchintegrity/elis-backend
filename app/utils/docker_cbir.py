@@ -4,50 +4,16 @@ CBIR (Content-Based Image Retrieval) API Client
 This module provides functions to interact with the CBIR microservice
 for image similarity search and indexing.
 """
-import os
 import logging
 import requests
 from typing import Tuple, Dict, List, Optional, Any
 from app.config.settings import (
-    is_container_path,
-    get_container_path_length,
-    WORKSPACE_ROOT,
+    convert_host_path_to_container,
     CBIR_SERVICE_URL,
     CBIR_TIMEOUT,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _convert_path_for_cbir(file_path: str) -> str:
-    """
-    Convert a file path to the format expected by the CBIR service.
-    
-    The CBIR service expects paths relative to its /workspace mount point.
-    
-    Args:
-        file_path: The file path (can be container path or host path)
-        
-    Returns:
-        Path that CBIR can access via its /workspace mount
-    """
-    # If it's a container path (/workspace/...), convert to /workspace/...
-    if is_container_path(file_path):
-        rel_path = file_path[get_container_path_length():]  # Remove /workspace
-        return f"/workspace{rel_path}"
-    
-    # If it's a workspace path (workspace/...), convert to /workspace/...
-    if file_path.startswith("workspace/"):
-        rel_path = file_path[len("workspace"):]  # Remove 'workspace'
-        return f"/workspace{rel_path}"
-    
-    # If it's an absolute workspace path, extract relative part
-    if WORKSPACE_ROOT and file_path.startswith(WORKSPACE_ROOT):
-        rel_path = file_path[len(WORKSPACE_ROOT):]
-        return f"/workspace{rel_path}"
-    
-    # Assume it's already in the correct format
-    return file_path
 
 
 def _convert_cbir_path_to_response(cbir_path: str, user_id: str) -> str:
@@ -104,7 +70,7 @@ def index_image(
     Returns:
         Tuple (success, message, result_data)
     """
-    cbir_path = _convert_path_for_cbir(image_path)
+    cbir_path = str(convert_host_path_to_container(image_path))
     
     payload = {
         "user_id": user_id,
@@ -152,7 +118,7 @@ def index_images_batch(
     # Convert paths for CBIR
     items = []
     for item in image_items:
-        cbir_path = _convert_path_for_cbir(item["image_path"])
+        cbir_path = str(convert_host_path_to_container(item["image_path"]))
         items.append({
             "image_path": cbir_path,
             "labels": item.get("labels", [])
@@ -204,7 +170,7 @@ def search_similar_images(
         Tuple (success, message, results)
         results is a list of dicts with id, distance, image_path, labels
     """
-    cbir_path = _convert_path_for_cbir(image_path)
+    cbir_path = str(convert_host_path_to_container(image_path))
     
     payload = {
         "user_id": user_id,
@@ -324,7 +290,7 @@ def delete_image_from_index(
     Returns:
         Tuple (success, message)
     """
-    cbir_path = _convert_path_for_cbir(image_path)
+    cbir_path = str(convert_host_path_to_container(image_path))
     
     payload = {
         "user_id": user_id,
@@ -365,7 +331,7 @@ def delete_images_batch(
     Returns:
         Tuple (success, message, result_data)
     """
-    cbir_paths = [_convert_path_for_cbir(p) for p in image_paths]
+    cbir_paths = [str(convert_host_path_to_container(p)) for p in image_paths]
     
     payload = {
         "user_id": user_id,
@@ -443,7 +409,7 @@ def check_images_indexed(
         Tuple (success, message, visibility_dict)
         visibility_dict maps image_path -> bool (True if indexed)
     """
-    cbir_paths = [_convert_path_for_cbir(p) for p in image_paths]
+    cbir_paths = [str(convert_host_path_to_container(p)) for p in image_paths]
     
     payload = {
         "user_id": user_id,

@@ -6,18 +6,18 @@ Run with: pytest tests/test_watermark_removal.py -v
 """
 
 import pytest
-import asyncio
+import requests
+import os
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
-from fastapi.testclient import TestClient
-from app.main import app
+
 from app.schemas import (
     WatermarkRemovalRequest,
     WatermarkRemovalInitiationResponse,
     WatermarkRemovalStatusResponse
 )
 
-
-client = TestClient(app)
+# Configuration
+BASE_URL = os.getenv("API_URL", "http://localhost:8000")
 
 
 class TestWatermarkRemovalEndpoints:
@@ -121,8 +121,8 @@ class TestWatermarkRemovalEndpoints:
             "message": "Watermark removal queued with mode 2"
         }
 
-        response = client.post(
-            "/documents/test_doc_id/remove-watermark",
+        response = requests.post(
+            f"{BASE_URL}/documents/test_doc_id/remove-watermark",
             json={"aggressiveness_mode": 2},
             headers={"Authorization": "Bearer test_token"}
         )
@@ -148,8 +148,8 @@ class TestWatermarkRemovalEndpoints:
             "error": None
         }
 
-        response = client.get(
-            "/documents/test_doc_id/watermark-removal/status",
+        response = requests.get(
+            f"{BASE_URL}/documents/test_doc_id/watermark-removal/status",
             headers={"Authorization": "Bearer test_token"}
         )
 
@@ -271,9 +271,10 @@ class TestWatermarkRemovalIntegration:
 
         with patch("os.path.exists", return_value=True), \
              patch("os.path.getsize", return_value=1000000), \
-             patch("os.path.dirname", return_value="/workspace"), \
+             patch("os.path.dirname", return_value="/tmp"), \
              patch("os.path.basename", return_value="research_paper.pdf"), \
-             patch("os.path.splitext", return_value=("research_paper", ".pdf")):
+             patch("os.path.splitext", return_value=("research_paper", ".pdf")), \
+             patch("app.utils.docker_watermark.is_container_path", return_value=False):
 
             from app.utils.docker_watermark import remove_watermark_with_docker
 
@@ -288,7 +289,7 @@ class TestWatermarkRemovalIntegration:
                     success, _, output_info = remove_watermark_with_docker(
                         doc_id="doc_id",
                         user_id="user_id",
-                        pdf_file_path="/workspace/research_paper.pdf",
+                        pdf_file_path="/tmp/research_paper.pdf",
                         aggressiveness_mode=mode
                     )
 

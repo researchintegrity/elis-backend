@@ -4,14 +4,18 @@ Docker-based PDF watermark removal using pdf-watermark-removal container
 import subprocess
 import os
 import logging
+from pathlib import Path
 from typing import Tuple, Dict
 from app.config.settings import (
     DOCKER_EXTRACTION_TIMEOUT,
     is_container_path,
-    get_container_path_length,
+    convert_container_path_to_host,
+    convert_host_path_to_container,
     PDF_WATERMARK_REMOVAL_DOCKER_IMAGE,
     WATERMARK_REMOVAL_OUTPUT_SUFFIX_TEMPLATE,
     WATERMARK_REMOVAL_DOCKER_WORKDIR,
+    CONTAINER_WORKSPACE_PATH,
+    HOST_WORKSPACE_PATH
 )
 
 logger = logging.getLogger(__name__)
@@ -74,28 +78,9 @@ def remove_watermark_with_docker(
     try:
         # Validate PDF file exists
         if not os.path.exists(pdf_file_path):
-            # Try to resolve relative path if it starts with workspace/
-            if pdf_file_path.startswith("workspace/"):
-                 workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-                 rel_path = pdf_file_path[len("workspace/"):]
-                 abs_path = os.path.join(workspace_root, rel_path)
-                 
-                 if os.path.exists(abs_path):
-                     pdf_file_path = abs_path
-                 else:
-                     if os.path.exists(os.path.abspath(pdf_file_path)):
-                         pdf_file_path = os.path.abspath(pdf_file_path)
-                     else:
-                         if os.path.exists(os.path.join(os.getcwd(), pdf_file_path)):
-                             pdf_file_path = os.path.join(os.getcwd(), pdf_file_path)
-                         else:
-                             error_msg = f"PDF file not found: {pdf_file_path}"
-                             logger.error(error_msg)
-                             return False, error_msg, output_file_info
-            else:
-                error_msg = f"PDF file not found: {pdf_file_path}"
-                logger.error(error_msg)
-                return False, error_msg, output_file_info
+            error_msg = f"PDF file not found: {pdf_file_path}"
+            logger.error(error_msg)
+            return False, error_msg, output_file_info
         
         # Convert to absolute paths for Docker
         pdf_file_path = os.path.abspath(pdf_file_path)
@@ -117,7 +102,7 @@ def remove_watermark_with_docker(
             f"  Aggressiveness mode: {aggressiveness_mode}\n"
             f"  Docker image: {docker_image}\n"
             f"  is_container_path: {is_container_path(output_dir)}\n"
-            f"  WORKSPACE_PATH env: {os.getenv('WORKSPACE_PATH')}"
+            f"  CONTAINER_WORKSPACE_PATH: {CONTAINER_WORKSPACE_PATH}"
         )
         
         # Get the directory containing the PDF
@@ -132,32 +117,21 @@ def remove_watermark_with_docker(
         # In container environment (Celery worker in Docker):
         #   - pdf_file_path will be like "/workspace/user/pdfs/file.pdf"
         #   - Docker daemon is on the host, needs the actual host path
-        #   - We need to convert using WORKSPACE_PATH environment variable
+        #   - We need to convert using HOST_WORKSPACE_PATH environment variable
         
         host_pdf_dir = pdf_dir
         
-        # If path starts with /workspace, we're in the worker container
-        workspace_path = os.getenv("HOST_WORKSPACE_PATH")
-        container_path_len = get_container_path_length()
-        
+        # If we're in the worker container
         if is_container_path(pdf_dir):
             # We're running in the worker container, need to convert paths for Docker daemon on host
             logger.info(f"Detected container environment. Converting paths for host Docker daemon")
             
-            if not workspace_path:
-                error_msg = "HOST_WORKSPACE_PATH environment variable not set"
-                logger.error(error_msg)
-                return False, error_msg, output_file_info
-            
-            # Convert: /workspace/user_id/pdfs/... → /host/path/workspace/user_id/pdfs/...
-            rel_path = pdf_dir[container_path_len:]  # Remove /workspace prefix
-            host_pdf_dir = workspace_path + rel_path
+            # Convert: container path to host path
+            host_pdf_dir = str(convert_container_path_to_host(Path(pdf_dir)))
             
             logger.debug(
                 f"Container path conversion:\n"
                 f"  Original PDF dir: {pdf_dir}\n"
-                f"  Relative path: {rel_path}\n"
-                f"  WORKSPACE_PATH: {workspace_path}\n"
                 f"  Host PDF dir: {host_pdf_dir}"
             )
         
@@ -193,9 +167,11 @@ def remove_watermark_with_docker(
             if os.path.exists(output_file_path):
                 output_file_size = os.path.getsize(output_file_path)
                 
+                container_path = str(convert_container_path_to_host(Path(output_file_path)))
+                
                 output_file_info = {
                     "filename": output_filename,
-                    "path": output_file_path,
+                    "path": container_path,
                     "size": output_file_size,
                     "status": "completed",
                     "aggressiveness_mode": aggressiveness_mode

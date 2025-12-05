@@ -119,8 +119,8 @@ async def list_images(
     images_col = get_images_collection()
     
     # Validate source_type if provided
-    if source_type and source_type not in ["extracted", "uploaded"]:
-        raise ValueError("source_type must be 'extracted' or 'uploaded'")
+    if source_type and source_type not in ["extracted", "uploaded", "panel"]:
+        raise ValueError("source_type must be 'extracted', 'uploaded', or 'panel'")
     
     # Build query
     query = {"user_id": user_id}

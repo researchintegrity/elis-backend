@@ -7,7 +7,7 @@ from bson import ObjectId
 from typing import Dict
 from app.db.mongodb import get_documents_collection
 from app.tasks.watermark_removal import remove_watermark_from_document
-from app.config.settings import resolve_workspace_path
+from app.config.settings import convert_host_path_to_container
 import logging
 
 logger = logging.getLogger(__name__)
@@ -68,9 +68,7 @@ async def initiate_watermark_removal(
         raise ValueError("Document is not a PDF file")
     
     # Resolve the stored file path to absolute path for worker container
-    # file_path may be relative (workspace/...) or absolute (/workspace/...)
-    # resolve_workspace_path handles both formats consistently
-    absolute_pdf_path = resolve_workspace_path(doc['file_path'])
+    pdf_path = str(convert_host_path_to_container(doc['file_path']))
     
     logger.info(
         f"Initiating watermark removal for doc_id={document_id}, "
@@ -81,7 +79,7 @@ async def initiate_watermark_removal(
     task = remove_watermark_from_document.delay(
         doc_id=document_id,
         user_id=user_id,
-        pdf_path=absolute_pdf_path,
+        pdf_path=pdf_path,
         aggressiveness_mode=aggressiveness_mode
     )
     

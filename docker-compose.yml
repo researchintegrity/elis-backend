@@ -12,8 +12,8 @@ services:
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_HOURS: 24
-      WORKSPACE_PATH: /workspace
-      HOST_WORKSPACE_PATH: ${WORKSPACE_PATH}
+      CONTAINER_WORKSPACE_PATH: ${CONTAINER_WORKSPACE_PATH}
+      HOST_WORKSPACE_PATH: ${HOST_WORKSPACE_PATH}
       # CBIR service configuration (use container name when running in Docker)
       CBIR_SERVICE_HOST: ${CBIR_SERVICE_HOST:-cbir-service}
       CBIR_SERVICE_PORT: ${CBIR_SERVICE_PORT:-8001}
@@ -24,7 +24,7 @@ services:
       - mongo
       - redis
     volumes:
-      - ${WORKSPACE_PATH}:/workspace
+      - ${HOST_WORKSPACE_PATH}:${CONTAINER_WORKSPACE_PATH}
     command: uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT:-8000} --reload
     networks:
       - elis_network
@@ -87,8 +87,8 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: /workspace
-      HOST_WORKSPACE_PATH: ${WORKSPACE_PATH}
+      CONTAINER_WORKSPACE_PATH: ${CONTAINER_WORKSPACE_PATH}
+      HOST_WORKSPACE_PATH: ${HOST_WORKSPACE_PATH}
       JWT_SECRET: ${JWT_SECRET}
       TRUFOR_USE_GPU: "false"
       # CBIR service configuration (use container name when running in Docker)
@@ -101,7 +101,7 @@ services:
       - redis
       - mongo
     volumes:
-      - ${WORKSPACE_PATH}:/workspace
+      - ${HOST_WORKSPACE_PATH}:${CONTAINER_WORKSPACE_PATH}
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker1@%h -c 1
     restart: unless-stopped
@@ -116,8 +116,8 @@ services:
       MONGODB_URL: mongodb://mongo:27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      WORKSPACE_PATH: /workspace
-      HOST_WORKSPACE_PATH: ${WORKSPACE_PATH}
+      CONTAINER_WORKSPACE_PATH: ${CONTAINER_WORKSPACE_PATH}
+      HOST_WORKSPACE_PATH: ${HOST_WORKSPACE_PATH}
       JWT_SECRET: ${JWT_SECRET}
       TRUFOR_USE_GPU: "false"
       # CBIR service configuration (use container name when running in Docker)
@@ -130,7 +130,7 @@ services:
       - redis
       - mongo
     volumes:
-      - ${WORKSPACE_PATH}:/workspace
+      - ${HOST_WORKSPACE_PATH}:${CONTAINER_WORKSPACE_PATH}
       - /var/run/docker.sock:/var/run/docker.sock
     command: celery -A app.celery_config worker -l info -n worker2@%h -c 1
     restart: unless-stopped
@@ -147,12 +147,12 @@ services:
     ports:
       - "${PROVENANCE_SERVICE_PORT:-8002}:${PROVENANCE_SERVICE_PORT:-8000}"
     volumes:
-      - ${WORKSPACE_PATH}:/workspace
+      - ${HOST_WORKSPACE_PATH}:${CONTAINER_WORKSPACE_PATH}
       - provenance_output:/app/output
     environment:
       - CBIR_ENDPOINT=http://cbir-service:${CBIR_SERVICE_PORT:-8001}
       - PROVENANCE_OUTPUT_DIR=/app/output
-      - REMOTE_DATA_PATH=/workspace
+      - REMOTE_DATA_PATH=${CONTAINER_WORKSPACE_PATH}
       - PROVENANCE_SERVICE_PORT=${PROVENANCE_SERVICE_PORT:-8000}
     networks:
       - elis_network
@@ -263,7 +263,7 @@ services:
       - ./system_modules/cbir-system/src:/app/src
       - ./system_modules/cbir-system/config:/app/config
       - ./system_modules/cbir-system/models:/app/models
-      - ${WORKSPACE_PATH}:/workspace
+      - ${HOST_WORKSPACE_PATH}:${CONTAINER_WORKSPACE_PATH}
     environment:
       - MILVUS_HOST=milvus-standalone
       - MODEL_DEVICE=cpu

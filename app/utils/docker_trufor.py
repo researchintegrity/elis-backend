@@ -4,15 +4,16 @@ Docker-based TruFor Detection using trufor container
 import subprocess
 import os
 import logging
-import time
-from typing import Tuple, Dict, Generator, Optional, Callable
+from pathlib import Path
+from typing import Tuple, Dict, Optional, Callable
 from app.config.settings import (
     is_container_path,
-    get_container_path_length,
     convert_container_path_to_host,
+    convert_host_path_to_container,
     TRUFOR_DOCKER_IMAGE,
     TRUFOR_TIMEOUT,
     TRUFOR_USE_GPU,
+    HOST_WORKSPACE_PATH
 )
 from app.utils.file_storage import get_analysis_output_path
 from app.schemas import AnalysisType
@@ -45,29 +46,8 @@ def run_trufor_detection_with_docker(
         docker_image = TRUFOR_DOCKER_IMAGE
 
     if not os.path.exists(image_path):
-        # Try to resolve relative path if it starts with workspace/
-        if image_path.startswith("workspace/"):
-             # Assuming we are in the root of the project or where workspace is accessible
-             # Try to find where workspace is located
-             workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-             # If image_path is "workspace/...", remove "workspace/" prefix and join with workspace_root
-             rel_path = image_path[len("workspace/"):]
-             abs_path = os.path.join(workspace_root, rel_path)
-             
-             if os.path.exists(abs_path):
-                 image_path = abs_path
-             else:
-                 # Try checking if we are already in a directory containing workspace
-                 if os.path.exists(os.path.abspath(image_path)):
-                     image_path = os.path.abspath(image_path)
-                 else:
-                     # Last resort: check if it's relative to CWD
-                     if os.path.exists(os.path.join(os.getcwd(), image_path)):
-                         image_path = os.path.join(os.getcwd(), image_path)
-                     else:
-                         return False, f"Source image file not found: {image_path}", results
-        else:
-            return False, f"Source image file not found: {image_path}", results
+        # Try to resolve path using centralized utility
+        return False, f"Source image file not found: {image_path}", results
     
     # Ensure absolute path
     image_path = os.path.abspath(image_path)
@@ -87,21 +67,22 @@ def run_trufor_detection_with_docker(
     host_image_dir = image_dir
     host_output_dir = output_dir_path
     
-    workspace_path = os.getenv("HOST_WORKSPACE_PATH")
-    container_path_len = get_container_path_length()
-    
-    if is_container_path(image_dir):
+    # Check if we are running in a container environment by checking if paths start with /workspace
+    # OR if HOST_WORKSPACE_PATH env var is set (which implies we might need conversion)
+    is_container_env = is_container_path(Path(image_dir))
+    if is_container_env:
         logger.info(f"Detected container environment. Converting paths for host Docker daemon")
         
-        if not workspace_path:
+        if not str(HOST_WORKSPACE_PATH):
             return False, "HOST_WORKSPACE_PATH environment variable not set", results
         
-        rel_path = image_dir[container_path_len:]
-        host_image_dir = workspace_path.rstrip('/') + '/' + rel_path.lstrip('/')
+        # Convert input path: container path to host path
+        if is_container_path(Path(image_dir)):
+            host_image_dir = str(convert_container_path_to_host(Path(image_dir)))
         
-        if is_container_path(output_dir_path):
-            rel_out_path = output_dir_path[container_path_len:]
-            host_output_dir = workspace_path.rstrip('/') + '/' + rel_out_path.lstrip('/')
+        # Convert output path: container path to host path
+        if is_container_path(Path(output_dir_path)):
+            host_output_dir = str(convert_container_path_to_host(Path(output_dir_path)))
 
     # Construct Docker command
     container_input_path = f"/data/{image_filename}"
@@ -162,8 +143,6 @@ def run_trufor_detection_with_docker(
         if stdout_rest:
             stdout_lines.append(stdout_rest)
             
-        full_stdout = "".join(stdout_lines)
-        
         if process.returncode != 0:
             logger.error(f"Docker command failed: {stderr}")
             if "Unknown runtime specified nvidia" in stderr:
@@ -177,7 +156,7 @@ def run_trufor_detection_with_docker(
         output_path = os.path.join(output_dir_path, expected_output)
         
         if os.path.exists(output_path):
-            results['visualization'] = convert_container_path_to_host(output_path)
+            results['visualization'] = str(convert_host_path_to_container(Path(output_path)))
             return True, "Analysis completed successfully", results
         else:
             # Check if any file was created
@@ -185,7 +164,7 @@ def run_trufor_detection_with_docker(
             if files:
                 # Maybe filename mismatch?
                 logger.warning(f"Expected {expected_output} but found {files}")
-                results['files'] = [convert_container_path_to_host(os.path.join(output_dir_path, f)) for f in files]
+                results['files'] = [str(convert_host_path_to_container(Path(os.path.join(output_dir_path, f)))) for f in files]
                 return True, "Analysis completed (filename mismatch?)", results
             
             return False, "Analysis completed but no output file found.", results

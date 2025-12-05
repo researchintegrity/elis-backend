@@ -14,9 +14,12 @@ from pathlib import Path
 from app.config.settings import (
     DOCKER_EXTRACTION_TIMEOUT,
     is_container_path,
-    get_container_path_length,
+    convert_container_path_to_host,
+    convert_host_path_to_container,
     PANEL_EXTRACTOR_DOCKER_IMAGE,
     PANEL_EXTRACTION_DOCKER_WORKDIR,
+    CONTAINER_WORKSPACE_PATH,
+    HOST_WORKSPACE_PATH
 )
 
 logger = logging.getLogger(__name__)
@@ -86,69 +89,40 @@ def extract_panels_with_docker(
             return False, error_msg, output_info
 
         # Validate all image files exist
-        for i, path in enumerate(image_paths):
+        for path in image_paths:
             if not os.path.exists(path):
-                # Try to resolve relative path if it starts with workspace/
-                if path.startswith("workspace/"):
-                     workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-                     rel_path = path[len("workspace/"):]
-                     abs_path = os.path.join(workspace_root, rel_path)
-                     
-                     if os.path.exists(abs_path):
-                         image_paths[i] = abs_path
-                     else:
-                         if os.path.exists(os.path.abspath(path)):
-                             image_paths[i] = os.path.abspath(path)
-                         else:
-                             if os.path.exists(os.path.join(os.getcwd(), path)):
-                                 image_paths[i] = os.path.join(os.getcwd(), path)
-                             else:
-                                 error_msg = f"Image file not found: {path}"
-                                 logger.error(error_msg)
-                                 return False, error_msg, output_info
-                else:
-                    error_msg = f"Image file not found: {path}"
-                    logger.error(error_msg)
-                    return False, error_msg, output_info
+                error_msg = f"Image file not found: {path}"
+                logger.error(error_msg)
+                return False, error_msg, output_info
 
         # Convert to absolute paths
         image_paths = [os.path.abspath(p) for p in image_paths]
 
         # Get the input directory (all images should be in same directory)
-        input_dir = os.path.dirname(image_paths[0])
+        # we are using the /<workspace>/<user_id>/images/ structure
+        # input dir should be path until find /images/
+        path = Path(image_paths[0])
+        parts = path.parts
+        images_index = None
+        for i, part in enumerate(parts):
+            if part == "images":
+                images_index = i
+                break
+        if images_index is None:
+            error_msg = f"No 'images' directory found in path: {image_paths[0]}"
+            logger.error(error_msg)
+            return False, error_msg, output_info
+        input_dir = str(Path(*parts[:images_index + 1]))
 
         # Verify all images are in the same directory
+        # This is a requirement for mounting into Docker
         for path in image_paths:
-            if os.path.dirname(path) != input_dir:
-                error_msg = f"All images must be in the same directory. Got: {input_dir} and {os.path.dirname(path)}"
+            if os.path.commonpath([input_dir, path]) != input_dir:
+                error_msg = f"All images must be under the input directory {input_dir}. Got: {path}"
                 logger.error(error_msg)
                 return False, error_msg, output_info
 
-        # Create output directory for panels, organized by source image
-        # Structure: /workspace/{user_id}/images/panels/{source_image_id}/{figname}/
-        # All panels should be in user-specific directory, not global location
-        
-        # Determine workspace root - construct correct path
-        # input_dir format: /workspace/{user_id}/images/extracted/{doc_id}
-        #             or: /workspace/{user_id}/images/uploaded
-        # We need: /workspace/{user_id}/images/panels
-        
-        # Extract user_id from path: /workspace/{user_id}/images/...
-        # Split path and find the user_id (third component after /workspace)
-        path_parts = input_dir.split(os.sep)
-        
-        # Find 'workspace' in path and get the next component (user_id)
-        try:
-            workspace_idx = path_parts.index('workspace')
-            user_id_from_path = path_parts[workspace_idx + 1]
-            workspace_root = os.sep.join(path_parts[:workspace_idx + 1])
-            workspace_user_dir = os.path.join(workspace_root, user_id_from_path)
-        except (ValueError, IndexError) as e:
-            error_msg = f"Failed to extract user_id from path {input_dir}: {str(e)}"
-            logger.error(error_msg)
-            return False, error_msg, output_info
-        
-        output_dir = os.path.join(workspace_user_dir, "images", "panels")
+        output_dir = os.path.join(input_dir, "panels")
         os.makedirs(output_dir, exist_ok=True)
 
         logger.info(
@@ -158,36 +132,31 @@ def extract_panels_with_docker(
             f"  Number of images: {len(image_paths)}\n"
             f"  Docker image: {docker_image}\n"
             f"  is_container_path: {is_container_path(input_dir)}\n"
-            f"  WORKSPACE_PATH env: {os.getenv('WORKSPACE_PATH')}"
+            f"  CONTAINER_WORKSPACE_PATH: {CONTAINER_WORKSPACE_PATH}"
         )
 
         # Handle Docker running inside a container vs on the host
         host_input_dir = input_dir
         host_output_dir = output_dir
-
-        workspace_path = os.getenv("HOST_WORKSPACE_PATH")
-        container_path_len = get_container_path_length()
-
-        if is_container_path(input_dir):
+        
+        is_container_env = is_container_path(input_dir)
+        if is_container_env:
             # We're running in the worker container, need to convert paths for Docker daemon on host
             logger.info(f"Detected container environment. Converting paths for host Docker daemon")
 
-            if not workspace_path:
+            if not str(HOST_WORKSPACE_PATH):
                 error_msg = "HOST_WORKSPACE_PATH environment variable not set"
                 logger.error(error_msg)
                 return False, error_msg, output_info
 
-            # Convert: /workspace/user_id/... → /host/path/workspace/user_id/...
-            rel_input_path = input_dir[container_path_len:]
-            rel_output_path = output_dir[container_path_len:]
-            host_input_dir = workspace_path + rel_input_path
-            host_output_dir = workspace_path + rel_output_path
+            # Convert: container path to host path
+            host_input_dir = str(convert_container_path_to_host(input_dir))
+            host_output_dir = str(convert_container_path_to_host(output_dir))
 
             logger.debug(
                 f"Container path conversion:\n"
                 f"  Original input dir: {input_dir}\n"
                 f"  Original output dir: {output_dir}\n"
-                f"  WORKSPACE_PATH: {workspace_path}\n"
                 f"  Host input dir: {host_input_dir}\n"
                 f"  Host output dir: {host_output_dir}"
             )
@@ -195,7 +164,7 @@ def extract_panels_with_docker(
         # Construct Docker command
         # The panel extractor expects: --input-path IMAGE_PATH [IMAGE_PATH ...]
         # and --output-path for the output directory
-        image_filenames = [os.path.basename(path) for path in image_paths]
+        image_filenames = [path.replace(str(input_dir) + os.sep, "") for path in image_paths]
         
         docker_command = [
             "docker",
@@ -255,8 +224,8 @@ def extract_panels_with_docker(
 
             output_info = {
                 "panels_count": len(panels_data),
-                "panels_csv_path": panels_csv_path,
-                "output_dir": output_dir,
+                "panels_csv_path": str(convert_host_path_to_container(panels_csv_path)),
+                "output_dir": str(convert_host_path_to_container(output_dir)),
                 "panels_data": panels_data,
                 "status": "completed"
             }

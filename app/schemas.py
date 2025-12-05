@@ -796,7 +796,7 @@ class CrossImageAnalysisCreate(BaseModel):
 class AnalysisResult(BaseModel):
     """Generic analysis result container"""
     method: Optional[int] = None
-    timestamp: Optional[datetime] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
     matches_image: Optional[str] = None
     clusters_image: Optional[str] = None
     visualization: Optional[str] = None

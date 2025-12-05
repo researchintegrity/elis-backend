@@ -3,7 +3,6 @@ Provenance Analysis Tasks
 
 Celery tasks for handling background provenance analysis.
 """
-from celery import current_task
 from app.celery_config import celery_app
 from app.db.mongodb import get_analyses_collection
 from app.services.provenance_service import run_provenance_analysis

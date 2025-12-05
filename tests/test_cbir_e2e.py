@@ -7,7 +7,7 @@ to the CBIR microservice. Requires the CBIR microservice to be running.
 Prerequisites:
 1. Backend API running at localhost:8000
 2. CBIR microservice running at localhost:8001 (or cbir-service:8001 if in Docker)
-3. MongoDB running at localhost:27017 (or 27018 for test)
+3. MongoDB running at localhost:27017
 4. Celery worker running for async tasks
 
 Configuration:
@@ -26,7 +26,6 @@ import time
 import os
 from pathlib import Path
 from PIL import Image, ImageDraw
-import io
 
 # Configuration
 BASE_URL = os.getenv("API_URL", "http://localhost:8000")
@@ -52,8 +51,8 @@ def auth_token():
     }
     try:
         requests.post(f"{BASE_URL}/auth/register", json=register_data)
-        # Ignore error if user already exists
     except Exception:
+        # Ignore error if user already exists
         pass
 
     # 2. Login
@@ -434,8 +433,6 @@ class TestCBIRErrorHandling:
     
     def test_unauthenticated_access(self):
         """Test that unauthenticated requests are rejected"""
-        response = requests.get(f"{BASE_URL}/cbir/health")
-        # Health might be public, try other endpoints
         response = requests.post(f"{BASE_URL}/cbir/index", json={})
         assert response.status_code in [401, 403]
     

@@ -22,7 +22,6 @@ from app.schemas import (
     AnalysisStatus,
 )
 from app.utils.docker_cbir import (
-    check_cbir_health,
     search_similar_images_upload,
 )
 from app.tasks.cbir import (

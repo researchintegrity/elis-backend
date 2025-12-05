@@ -6,13 +6,12 @@ from app.schemas import (
     CrossImageAnalysisCreate,
     SingleImageAnalysisCreate,
     AnalysisType,
-    AnalysisStatus
+    AnalysisStatus,
 )
-from app.tasks.copy_move_detection import detect_copy_move
 from app.services.resource_helpers import get_owned_resource
-from app.config.settings import resolve_workspace_path
 from datetime import datetime
 from bson import ObjectId
+from app.tasks.copy_move_detection import detect_copy_move
 
 router = APIRouter(
     prefix="/analyses",
@@ -45,6 +44,61 @@ async def get_analysis(
         )
         
     return analysis
+
+
+@router.post("/copy-move/single", status_code=status.HTTP_202_ACCEPTED, response_model=dict)
+async def analyze_copy_move_single(
+    request: SingleImageAnalysisCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Start single-image copy-move detection analysis.
+    """
+    user_id_str = str(current_user["_id"])
+    
+    # Verify ownership
+    image = await get_owned_resource(
+        get_images_collection,
+        request.image_id,
+        user_id_str,
+        "Image"
+    )
+    
+    # Create Analysis document
+    analyses_col = get_analyses_collection()
+    analysis_doc = {
+        "type": AnalysisType.SINGLE_IMAGE_COPY_MOVE,
+        "user_id": user_id_str,
+        "source_image_id": request.image_id,
+        "status": AnalysisStatus.PENDING,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        "method": request.method
+    }
+    result = analyses_col.insert_one(analysis_doc)
+    analysis_id = str(result.inserted_id)
+    
+    # Update Image document with analysis_id
+    images_col = get_images_collection()
+    images_col.update_one(
+        {"_id": ObjectId(request.image_id)},
+        {"$addToSet": {"analysis_ids": analysis_id}}
+    )
+    
+    # Trigger task with analysis_id
+    detect_copy_move.delay(
+        analysis_id=analysis_id,
+        image_id=request.image_id,
+        user_id=user_id_str,
+        image_path=image["file_path"],
+        method=request.method
+    )
+    
+    return {
+        "message": "Single-image copy-move analysis started",
+        "analysis_id": analysis_id
+    }
+
 
 @router.post("/copy-move/cross", status_code=status.HTTP_202_ACCEPTED, response_model=dict)
 async def analyze_copy_move_cross(
@@ -106,8 +160,8 @@ async def analyze_copy_move_cross(
         source_image_id=request.source_image_id,
         target_image_id=request.target_image_id,
         user_id=user_id_str,
-        source_image_path=resolve_workspace_path(source_image["file_path"]),
-        target_image_path=resolve_workspace_path(target_image["file_path"]),
+        source_image_path=source_image["file_path"],
+        target_image_path=target_image["file_path"],
         method=request.method
     )
     
@@ -160,7 +214,7 @@ async def analyze_trufor(
         analysis_id=analysis_id,
         image_id=request.image_id,
         user_id=user_id_str,
-        image_path=resolve_workspace_path(image["file_path"])
+        image_path=image["file_path"]
     )
     
     return {"message": "TruFor analysis started", "analysis_id": analysis_id}

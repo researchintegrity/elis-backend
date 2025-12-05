@@ -19,8 +19,28 @@ from pathlib import Path
 # ============================================================================
 
 # Base directory for all user uploads and workspace files
-# Use absolute path for workspace to avoid issues with relative paths in different contexts
-UPLOAD_DIR = Path(os.getenv("WORKSPACE_PATH", os.path.abspath("workspace")))
+
+
+
+
+# Path constants
+CONTAINER_WORKSPACE_PATH = Path(os.getenv("CONTAINER_WORKSPACE_PATH"))
+if CONTAINER_WORKSPACE_PATH is None:
+    raise ValueError("CONTAINER_WORKSPACE_PATH environment variable must be set")
+EXTRACTION_SUBDIRECTORY = "images/extracted"
+
+# Workspace root directory (can be overridden by environment variable)
+HOST_WORKSPACE_PATH = Path(os.getenv("HOST_WORKSPACE_PATH"))
+if HOST_WORKSPACE_PATH is None:
+    raise ValueError("HOST_WORKSPACE_PATH environment variable must be set")
+
+RUNNING_ENV =os.getenv("ENVIRONMENT", "")
+if RUNNING_ENV != "TEST":
+    # Use absolute path for workspace to avoid issues with relative paths in different contexts
+    UPLOAD_DIR = Path(CONTAINER_WORKSPACE_PATH)
+else:
+    UPLOAD_DIR = Path(HOST_WORKSPACE_PATH)
+
 
 # ============================================================================
 # EXTRACTION SETTINGS
@@ -37,13 +57,13 @@ PDF_WATERMARK_REMOVAL_DOCKER_IMAGE = "pdf-watermark-removal:latest"
 WATERMARK_REMOVAL_OUTPUT_SUFFIX_TEMPLATE = "_watermark_removed_m{mode}.pdf"
 
 # Working directory inside the watermark-removal Docker container
-WATERMARK_REMOVAL_DOCKER_WORKDIR = "/workspace"
+WATERMARK_REMOVAL_DOCKER_WORKDIR = CONTAINER_WORKSPACE_PATH
 
 # Docker image for panel extraction (system_modules/panel-extractor)
 PANEL_EXTRACTOR_DOCKER_IMAGE = "panel-extractor:latest"
 
 # Working directory inside the panel-extractor Docker container
-PANEL_EXTRACTION_DOCKER_WORKDIR = "/workspace"
+PANEL_EXTRACTION_DOCKER_WORKDIR = CONTAINER_WORKSPACE_PATH
 
 # Panel extraction settings
 PANEL_EXTRACTION_TIMEOUT = 600  # 10 minutes (panel extraction can take longer)
@@ -52,12 +72,12 @@ MAX_IMAGES_PER_EXTRACTION = 20  # Maximum number of images to process in one bat
 # Docker image for Copy-Move Detection (system_modules/copy-move-detection)
 COPY_MOVE_DETECTION_DOCKER_IMAGE = "copy-move-detection:latest"
 COPY_MOVE_DETECTION_TIMEOUT = 600  # 10 minutes
-COPY_MOVE_DETECTION_DOCKER_WORKDIR = "/workspace"
+COPY_MOVE_DETECTION_DOCKER_WORKDIR = CONTAINER_WORKSPACE_PATH
 
 # Docker image for TruFor Detection (system_modules/TruFor)
 TRUFOR_DOCKER_IMAGE = "trufor:latest"
 TRUFOR_TIMEOUT = 600  # 10 minutes
-TRUFOR_DOCKER_WORKDIR = "/workspace"
+TRUFOR_DOCKER_WORKDIR = CONTAINER_WORKSPACE_PATH
 TRUFOR_USE_GPU = os.getenv("TRUFOR_USE_GPU", "true").lower() == "true"
 
 # ============================================================================
@@ -92,9 +112,7 @@ DOCKER_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_COMPOSE_EXTRACTION_TIMEOUT = 300  # 5 minutes
 DOCKER_IMAGE_CHECK_TIMEOUT = 10  # Check if image exists
 
-# Path constants
-APP_WORKSPACE_PREFIX = "/workspace"
-EXTRACTION_SUBDIRECTORY = "images/extracted"
+
 
 # ============================================================================
 # CELERY TASK SETTINGS
@@ -115,13 +133,6 @@ CELERY_RESULT_EXPIRES = 3600  # 1 hour
 # Redis connection timeouts
 CELERY_REDIS_SOCKET_CONNECT_TIMEOUT = 5
 CELERY_REDIS_SOCKET_TIMEOUT = 5
-
-# ============================================================================
-# FILE STORAGE SETTINGS
-# ============================================================================
-
-# Workspace root directory (can be overridden by environment variable)
-WORKSPACE_ROOT = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
 
 # Supported image file extensions for extraction
 SUPPORTED_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.tiff', '.bmp')
@@ -172,10 +183,10 @@ def get_container_path_prefix() -> str:
     Returns:
         Container path prefix: /workspace
     """
-    return APP_WORKSPACE_PREFIX
+    return CONTAINER_WORKSPACE_PATH
 
 
-def is_container_path(path: str) -> bool:
+def is_container_path(path: Path) -> bool:
     """
     Check if a path is running inside a container
     
@@ -185,20 +196,9 @@ def is_container_path(path: str) -> bool:
     Returns:
         True if path starts with container prefix, False otherwise
     """
-    return path.startswith(APP_WORKSPACE_PREFIX)
+    return Path(path).is_relative_to(CONTAINER_WORKSPACE_PATH)
 
-
-def get_container_path_length() -> int:
-    """
-    Get the length of the container path prefix (for string slicing)
-    
-    Returns:
-        Length of /workspace
-    """
-    return len(APP_WORKSPACE_PREFIX)
-
-
-def convert_container_path_to_host(container_path: str) -> str:
+def convert_container_path_to_host(container_path: Path) -> Path:
     """
     Convert a container path to a relative workspace path.
     
@@ -206,52 +206,37 @@ def convert_container_path_to_host(container_path: str) -> str:
         container_path: Path inside container (starts with /workspace)
         
     Returns:
-        Relative path from workspace root (without WORKSPACE_ROOT prefix)
+        Relative path from workspace root (without HOST_WORKSPACE_PATH prefix)
         
-    Examples:
-        /workspace/user_id/images/... → workspace/user_id/images/...
     """
+    # if container is not Path convert to Path
+    container_path = Path(container_path) if not isinstance(container_path, Path) else container_path
     if is_container_path(container_path):
-        # Remove /workspace prefix, leaving just the relative path
-        rel_path = container_path[get_container_path_length():]  # Removes /workspace
-        # Add 'workspace' prefix back to create workspace-relative path
-        return "workspace" + rel_path
+        # Remove container workspace prefix, leaving just the relative path
+        try:
+            rel_path = container_path.relative_to(CONTAINER_WORKSPACE_PATH)
+        except ValueError:
+            raise ValueError(f"Path {container_path} is not under container workspace path {CONTAINER_WORKSPACE_PATH}")
+        
+        # Add host workspace prefix back to create workspace-relative path
+        return HOST_WORKSPACE_PATH / rel_path
     return container_path
 
-
-def resolve_workspace_path(stored_path: str) -> str:
+def convert_host_path_to_container(path: Path) -> Path:
     """
-    Resolve a stored workspace path to the actual filesystem path.
-    
-    Stored paths in the database may be in relative format like:
-    - "workspace/user_id/images/..." (relative, for portability)
-    
-    This function converts them to the actual filesystem path based on
-    the current WORKSPACE_PATH setting.
+    Ensure a path is in container format.
     
     Args:
-        stored_path: Path as stored in the database
-        
+        path: Path to ensure is in container format
     Returns:
-        Absolute filesystem path that can be used for file operations
-        
-    Examples:
-        workspace/user_id/images/test.jpg → /workspace/user_id/images/test.jpg
-        /workspace/user_id/images/test.jpg → /workspace/user_id/images/test.jpg (unchanged)
+        Path in container format
     """
-    # If already an absolute container path, return as-is
-    if is_container_path(stored_path):
-        return stored_path
-    
-    # If it's a relative "workspace/..." path, convert to absolute
-    if stored_path.startswith("workspace/"):
-        # Remove "workspace/" prefix and prepend the actual workspace path
-        rel_path = stored_path[len("workspace/"):]
-        return f"{APP_WORKSPACE_PREFIX}/{rel_path}"
-    
-    # If it's some other relative path, try to resolve it
-    if not os.path.isabs(stored_path):
-        # Try prepending WORKSPACE_ROOT
-        return os.path.join(WORKSPACE_ROOT, stored_path)
-    
-    return stored_path
+    path = Path(path) if not isinstance(path, Path) else path
+    if is_container_path(path):
+        return path
+    # Convert host path to container path
+    try:
+        rel_path = path.relative_to(HOST_WORKSPACE_PATH)
+    except ValueError:
+        raise ValueError(f"Path {path} is not under host workspace path {HOST_WORKSPACE_PATH}")
+    return CONTAINER_WORKSPACE_PATH / rel_path

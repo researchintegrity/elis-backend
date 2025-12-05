@@ -3,7 +3,6 @@ CBIR (Content-Based Image Retrieval) tasks for async processing
 
 These tasks handle background indexing and searching operations.
 """
-from celery import current_task
 from app.celery_config import celery_app
 from app.db.mongodb import get_images_collection, get_analyses_collection
 from app.utils.docker_cbir import (
@@ -11,11 +10,10 @@ from app.utils.docker_cbir import (
     index_images_batch,
     search_similar_images,
     delete_image_from_index,
-    delete_images_batch,
     delete_user_data,
 )
 from app.config.settings import CELERY_MAX_RETRIES
-from app.schemas import AnalysisStatus, AnalysisType
+from app.schemas import AnalysisStatus
 from bson import ObjectId
 from datetime import datetime
 import logging

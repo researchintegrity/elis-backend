@@ -12,18 +12,20 @@ Tests cover:
 """
 
 import pytest
-from fastapi.testclient import TestClient
+import requests
 from pathlib import Path
 import io
 import os
+from app.config.settings import convert_container_path_to_host
 from bson import ObjectId
-import uuid
 from unittest.mock import patch, MagicMock
 
-from app.main import app
 from app.db.mongodb import get_documents_collection, get_images_collection, db_connection
 from app.utils.file_storage import UPLOAD_DIR, delete_directory
 from app.config.storage_quota import MAX_IMAGE_FILE_SIZE, MAX_PDF_FILE_SIZE
+
+# Configuration
+BASE_URL = os.getenv("API_URL", "http://localhost:8000")
 
 
 # ============================================================================
@@ -77,13 +79,7 @@ def mock_celery_tasks_globally():
 
 
 @pytest.fixture
-def client():
-    """Create test client"""
-    return TestClient(app)
-
-
-@pytest.fixture
-def test_user_token(client):
+def test_user_token():
     """Register and login a test user, return auth token"""
     # Generate unique username for each test
     import uuid
@@ -93,8 +89,8 @@ def test_user_token(client):
     email = f"testuser_{unique_id}@example.com"
     
     # Register user
-    register_response = client.post(
-        "/auth/register",
+    register_response = requests.post(
+        f"{BASE_URL}/auth/register",
         json={
             "username": username,
             "email": email,
@@ -106,8 +102,8 @@ def test_user_token(client):
     assert register_response.status_code == 200, f"Register failed: {register_response.text}"
     
     # Login user - use form data for OAuth2PasswordRequestForm
-    login_response = client.post(
-        "/auth/login",
+    login_response = requests.post(
+        f"{BASE_URL}/auth/login",
         data={
             "username": username,
             "password": "TestPassword123"
@@ -127,12 +123,15 @@ def test_user_token(client):
 def cleanup_workspace():
     """Cleanup workspace directory after each test"""
     yield
-    # Clean up workspace directory
+    # Clean up workspace directory - delete only child directories, not the root UPLOAD_DIR
     if UPLOAD_DIR.exists():
-        try:
-            delete_directory(str(UPLOAD_DIR))
-        except Exception:
-            pass
+        for child in UPLOAD_DIR.iterdir():
+            if child.is_dir():
+                try:
+                    delete_directory(str(child))
+                except Exception:
+                    # If deletion fails, the workspace was already clean or error occurred, just pass
+                    pass
 
 
 @pytest.fixture(autouse=True)
@@ -252,14 +251,14 @@ def create_test_image(filename: str = "test.png", format_type: str = "png") -> t
 class TestDocumentUpload:
     """Test PDF document upload functionality"""
     
-    def test_upload_valid_pdf(self, client, test_user_token):
+    def test_upload_valid_pdf(self, test_user_token):
         """Test uploading a valid PDF file"""
         token, user_id = test_user_token
         filename, pdf_content = create_test_pdf()
         
         # Celery task is mocked by autouse fixture mock_celery_tasks_globally
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -274,23 +273,23 @@ class TestDocumentUpload:
         assert data["extracted_image_count"] == 0
         assert "_id" in data or "id" in data
     
-    def test_upload_pdf_without_auth(self, client):
+    def test_upload_pdf_without_auth(self):
         """Test uploading PDF without authentication should fail"""
         filename, pdf_content = create_test_pdf()
         
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")}
         )
         
         assert response.status_code == 401
     
-    def test_upload_invalid_file_format(self, client, test_user_token):
+    def test_upload_invalid_file_format(self, test_user_token):
         """Test uploading non-PDF file should fail"""
         token, user_id = test_user_token
         
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": ("test.txt", io.BytesIO(b"This is not a PDF"), "text/plain")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -298,15 +297,15 @@ class TestDocumentUpload:
         assert response.status_code == 400
         assert "PDF" in response.json()["detail"]
     
-    def test_upload_oversized_pdf(self, client, test_user_token):
+    def test_upload_oversized_pdf(self, test_user_token):
         """Test uploading oversized PDF should fail"""
         token, user_id = test_user_token
         
         # Create oversized content (exceeds 50MB limit)
         oversized_content = b"%PDF-1.4\n" + (b"x" * (MAX_PDF_FILE_SIZE + 1))
         
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": ("oversized.pdf", io.BytesIO(oversized_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -314,7 +313,7 @@ class TestDocumentUpload:
         assert response.status_code == 400
         assert "large" in response.json()["detail"].lower()
     
-    def test_upload_multiple_pdfs(self, client, test_user_token):
+    def test_upload_multiple_pdfs(self, test_user_token):
         """Test uploading multiple PDF files"""
         token, user_id = test_user_token
         doc_ids = []
@@ -322,8 +321,8 @@ class TestDocumentUpload:
         # Celery task is mocked by autouse fixture mock_celery_tasks_globally
         for i in range(3):
             filename, pdf_content = create_test_pdf(f"test{i}.pdf")
-            response = client.post(
-                "/documents/upload",
+            response = requests.post(
+                f"{BASE_URL}/documents/upload",
                 files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -338,13 +337,13 @@ class TestDocumentUpload:
         # Verify all documents are unique
         assert len(set(doc_ids)) == 3
     
-    def test_file_saved_with_correct_path(self, client, test_user_token):
+    def test_file_saved_with_correct_path(self, test_user_token):
         """Test that PDF files are saved in the correct directory structure"""
         token, user_id = test_user_token
         filename, pdf_content = create_test_pdf()
         
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -355,15 +354,15 @@ class TestDocumentUpload:
         # Verify file path contains user_id and pdfs subfolder
         assert user_id in file_path
         assert "pdfs" in file_path
-        assert Path(file_path).exists()
+        assert Path(convert_container_path_to_host(file_path)).exists()
     
-    def test_extraction_folder_created(self, client, test_user_token):
+    def test_extraction_folder_created(self, test_user_token):
         """Test that extraction folder is created for document"""
         token, user_id = test_user_token
         filename, pdf_content = create_test_pdf()
         
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -385,21 +384,21 @@ class TestDocumentUpload:
 class TestDocumentRetrieval:
     """Test PDF document retrieval functionality"""
     
-    def test_get_documents_list(self, client, test_user_token):
+    def test_get_documents_list(self, test_user_token):
         """Test retrieving list of user's documents"""
         token, user_id = test_user_token
         
         # Upload a document
         filename, pdf_content = create_test_pdf()
-        client.post(
-            "/documents/upload",
+        requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         # Get documents list
-        response = client.get(
-            "/documents",
+        response = requests.get(
+            f"{BASE_URL}/documents",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -410,22 +409,22 @@ class TestDocumentRetrieval:
         # Filename may be the original or stored name
         assert "filename" in data[0]
     
-    def test_get_documents_with_pagination(self, client, test_user_token):
+    def test_get_documents_with_pagination(self, test_user_token):
         """Test pagination of documents list"""
         token, user_id = test_user_token
         
         # Upload 5 documents
         for i in range(5):
             filename, pdf_content = create_test_pdf(f"test{i}.pdf")
-            client.post(
-                "/documents/upload",
+            requests.post(
+                f"{BASE_URL}/documents/upload",
                 files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
                 headers={"Authorization": f"Bearer {token}"}
             )
         
         # Get first page (limit=2)
-        response = client.get(
-            "/documents?limit=2&offset=0",
+        response = requests.get(
+            f"{BASE_URL}/documents?limit=2&offset=0",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -433,14 +432,14 @@ class TestDocumentRetrieval:
         data = response.json()
         assert len(data) <= 2
     
-    def test_get_specific_document(self, client, test_user_token):
+    def test_get_specific_document(self, test_user_token):
         """Test retrieving specific document by ID"""
         token, user_id = test_user_token
         
         # Upload a document
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -448,8 +447,8 @@ class TestDocumentRetrieval:
         doc_id = get_id_from_response(upload_response.json())
         
         # Get specific document
-        response = client.get(
-            f"/documents/{doc_id}",
+        response = requests.get(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -459,34 +458,34 @@ class TestDocumentRetrieval:
         # Filename may be the original or stored name
         assert "filename" in data
     
-    def test_get_nonexistent_document(self, client, test_user_token):
+    def test_get_nonexistent_document(self, test_user_token):
         """Test retrieving nonexistent document returns 404"""
         token, user_id = test_user_token
         fake_id = str(ObjectId())
         
-        response = client.get(
-            f"/documents/{fake_id}",
+        response = requests.get(
+            f"{BASE_URL}/documents/{fake_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert response.status_code == 404
     
-    def test_get_document_from_another_user(self, client, test_user_token):
+    def test_get_document_from_another_user(self, test_user_token):
         """Test that users cannot access other users' documents"""
         token1, user_id1 = test_user_token
         
         # Upload document as user1
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token1}"}
         )
         doc_id = get_id_from_response(upload_response.json())
         
         # Register and login as user2
-        client.post(
-            "/auth/register",
+        requests.post(
+            f"{BASE_URL}/auth/register",
             json={
                 "username": "testuser2",
                 "email": "testuser2@example.com",
@@ -494,8 +493,8 @@ class TestDocumentRetrieval:
                 "full_name": "Test User 2"
             }
         )
-        login_response = client.post(
-            "/auth/login",
+        login_response = requests.post(
+            f"{BASE_URL}/auth/login",
             data={
                 "username": "testuser2",
                 "password": "TestPassword456"
@@ -504,8 +503,8 @@ class TestDocumentRetrieval:
         token2 = login_response.json()["access_token"]
         
         # Try to get user1's document as user2
-        response = client.get(
-            f"/documents/{doc_id}",
+        response = requests.get(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token2}"}
         )
         
@@ -519,13 +518,13 @@ class TestDocumentRetrieval:
 class TestImageUpload:
     """Test image file upload functionality"""
     
-    def test_upload_valid_image(self, client, test_user_token):
+    def test_upload_valid_image(self, test_user_token):
         """Test uploading a valid image file"""
         token, user_id = test_user_token
         filename, image_content = create_test_image("test.png")
         
-        response = client.post(
-            "/images/upload",
+        response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -540,14 +539,14 @@ class TestImageUpload:
         assert data["source_type"] == "uploaded"
         assert data["document_id"] is None
     
-    def test_upload_image_linked_to_document(self, client, test_user_token):
+    def test_upload_image_linked_to_document(self, test_user_token):
         """Test uploading image linked to a document"""
         token, user_id = test_user_token
         
         # Upload PDF first (Celery task is mocked by autouse fixture)
         pdf_filename, pdf_content = create_test_pdf()
-        pdf_response = client.post(
-            "/documents/upload",
+        pdf_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (pdf_filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -555,8 +554,8 @@ class TestImageUpload:
         
         # Upload image linked to document
         img_filename, img_content = create_test_image()
-        img_response = client.post(
-            "/images/upload",
+        img_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (img_filename, io.BytesIO(img_content), "image/png")},
             params={"document_id": doc_id},
             headers={"Authorization": f"Bearer {token}"}
@@ -567,34 +566,34 @@ class TestImageUpload:
         assert img_data["source_type"] == "uploaded"
         assert img_data["document_id"] == doc_id
     
-    def test_upload_invalid_image_format(self, client, test_user_token):
+    def test_upload_invalid_image_format(self, test_user_token):
         """Test uploading non-image file should fail"""
         token, user_id = test_user_token
         
-        response = client.post(
-            "/images/upload",
+        response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": ("test.txt", io.BytesIO(b"Not an image"), "text/plain")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert response.status_code == 400
     
-    def test_upload_oversized_image(self, client, test_user_token):
+    def test_upload_oversized_image(self, test_user_token):
         """Test uploading oversized image should fail"""
         token, user_id = test_user_token
         
         # Create oversized content (exceeds 10MB limit)
         oversized_content = b"\x89PNG\r\n\x1a\n" + (b"x" * (MAX_IMAGE_FILE_SIZE + 1))
         
-        response = client.post(
-            "/images/upload",
+        response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": ("oversized.png", io.BytesIO(oversized_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert response.status_code == 400
     
-    def test_upload_multiple_image_formats(self, client, test_user_token):
+    def test_upload_multiple_image_formats(self, test_user_token):
         """Test uploading images in different formats"""
         token, user_id = test_user_token
         formats = [("test.png", "png"), ("test.jpg", "jpg")]
@@ -602,8 +601,8 @@ class TestImageUpload:
         
         for filename, fmt in formats:
             img_filename, img_content = create_test_image(filename, fmt)
-            response = client.post(
-                "/images/upload",
+            response = requests.post(
+                f"{BASE_URL}/images/upload",
                 files={"file": (img_filename, io.BytesIO(img_content), f"image/{fmt}")},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -621,21 +620,21 @@ class TestImageUpload:
 class TestImageRetrieval:
     """Test image retrieval functionality"""
     
-    def test_get_images_list(self, client, test_user_token):
+    def test_get_images_list(self, test_user_token):
         """Test retrieving list of user's images"""
         token, user_id = test_user_token
         
         # Upload an image
         filename, image_content = create_test_image()
-        client.post(
-            "/images/upload",
+        requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         # Get images list
-        response = client.get(
-            "/images",
+        response = requests.get(
+            f"{BASE_URL}/images",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -646,21 +645,21 @@ class TestImageRetrieval:
         # Filename is renamed to mongodb_id.ext, check original_filename instead
         assert data[0]["original_filename"] == filename
     
-    def test_get_images_filtered_by_source_type(self, client, test_user_token):
+    def test_get_images_filtered_by_source_type(self, test_user_token):
         """Test filtering images by source type"""
         token, user_id = test_user_token
         
         # Upload an image
         filename, image_content = create_test_image()
-        client.post(
-            "/images/upload",
+        requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         # Get uploaded images
-        response = client.get(
-            "/images?source_type=uploaded",
+        response = requests.get(
+            f"{BASE_URL}/images?source_type=uploaded",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -669,14 +668,14 @@ class TestImageRetrieval:
         assert len(data) == 1
         assert data[0]["source_type"] == "uploaded"
     
-    def test_get_specific_image(self, client, test_user_token):
+    def test_get_specific_image(self, test_user_token):
         """Test retrieving specific image by ID"""
         token, user_id = test_user_token
         
         # Upload an image
         filename, image_content = create_test_image()
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -684,8 +683,8 @@ class TestImageRetrieval:
         image_id = get_id_from_response(upload_response.json())
         
         # Get specific image
-        response = client.get(
-            f"/images/{image_id}",
+        response = requests.get(
+            f"{BASE_URL}/images/{image_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -703,57 +702,59 @@ class TestImageRetrieval:
 class TestDownload:
     """Test file download functionality"""
     
-    def test_download_pdf_file(self, client, test_user_token):
+    def test_download_pdf_file(self, test_user_token):
         """Test downloading uploaded PDF file"""
         token, user_id = test_user_token
         
         # Upload a document (Celery task is mocked by autouse fixture)
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        print("filename:", filename)
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         doc_id = get_id_from_response(upload_response.json())
         
         # Download document
-        response = client.get(
-            f"/documents/{doc_id}/download",
+        response = requests.get(
+            f"{BASE_URL}/documents/{doc_id}/download",
             headers={"Authorization": f"Bearer {token}"}
         )
-        
+        print("Download response status code:", response.status_code)
+        print("Download response headers:", response.headers)
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
     
-    def test_download_image_file(self, client, test_user_token):
+    def test_download_image_file(self, test_user_token):
         """Test downloading uploaded image file"""
         token, user_id = test_user_token
         
         # Upload an image
         filename, image_content = create_test_image()
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
         image_id = get_id_from_response(upload_response.json())
         
         # Download image
-        response = client.get(
-            f"/images/{image_id}/download",
+        response = requests.get(
+            f"{BASE_URL}/images/{image_id}/download",
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert response.status_code == 200
         assert "image" in response.headers["content-type"]
     
-    def test_download_nonexistent_file(self, client, test_user_token):
+    def test_download_nonexistent_file(self, test_user_token):
         """Test downloading nonexistent file returns 404"""
         token, user_id = test_user_token
         fake_id = str(ObjectId())
         
-        response = client.get(
-            f"/documents/{fake_id}/download",
+        response = requests.get(
+            f"{BASE_URL}/documents/{fake_id}/download",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -767,14 +768,14 @@ class TestDownload:
 class TestDelete:
     """Test file deletion functionality"""
     
-    def test_delete_document(self, client, test_user_token):
+    def test_delete_document(self, test_user_token):
         """Test deleting a document"""
         token, user_id = test_user_token
         
         # Upload a document
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -782,55 +783,48 @@ class TestDelete:
         file_path = upload_response.json()["file_path"]
         
         # Verify file exists
-        assert Path(file_path).exists()
+        assert Path(convert_container_path_to_host(file_path)).exists()
         
         # Delete document
-        response = client.delete(
-            f"/documents/{doc_id}",
+        response = requests.delete(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert response.status_code == 204
         
         # Verify file is deleted
-        assert not Path(file_path).exists()
+        assert not Path(convert_container_path_to_host(file_path)).exists()
     
-    def test_delete_document_cascades_to_images(self, client, test_user_token):
+    def test_delete_document_cascades_to_images(self, test_user_token):
         """Test that deleting document also deletes associated extracted images"""
         token, user_id = test_user_token
         
         # Upload a document
         pdf_filename, pdf_content = create_test_pdf()
-        pdf_response = client.post(
-            "/documents/upload",
+        pdf_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (pdf_filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         doc_id = get_id_from_response(pdf_response.json())
         
-        # Get list of images before deletion
-        images_response = client.get(
-            "/images",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        images_before = len(images_response.json())
-        
         # Delete document
-        delete_response = client.delete(
-            f"/documents/{doc_id}",
+        delete_response = requests.delete(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert delete_response.status_code == 204
     
-    def test_delete_image(self, client, test_user_token):
+    def test_delete_image(self, test_user_token):
         """Test deleting a user-uploaded image"""
         token, user_id = test_user_token
         
         # Upload an image
         filename, image_content = create_test_image()
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -838,11 +832,11 @@ class TestDelete:
         file_path = upload_response.json()["file_path"]
         
         # Verify file exists
-        assert Path(file_path).exists()
+        assert Path(convert_container_path_to_host(file_path)).exists()
         
         # Delete image
-        response = client.delete(
-            f"/images/{image_id}",
+        response = requests.delete(
+            f"{BASE_URL}/images/{image_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -851,22 +845,22 @@ class TestDelete:
         # Verify file is deleted
         assert not Path(file_path).exists()
     
-    def test_cannot_delete_other_users_document(self, client, test_user_token):
+    def test_cannot_delete_other_users_document(self, test_user_token):
         """Test that users cannot delete other users' documents"""
         token1, user_id1 = test_user_token
         
         # Upload document as user1
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token1}"}
         )
         doc_id = get_id_from_response(upload_response.json())
         
         # Register and login as user2
-        client.post(
-            "/auth/register",
+        requests.post(
+            f"{BASE_URL}/auth/register",
             json={
                 "username": "testuser2",
                 "email": "testuser2@example.com",
@@ -874,8 +868,8 @@ class TestDelete:
                 "full_name": "Test User 2"
             }
         )
-        login_response = client.post(
-            "/auth/login",
+        login_response = requests.post(
+            f"{BASE_URL}/auth/login",
             data={
                 "username": "testuser2",
                 "password": "TestPassword456"
@@ -884,8 +878,8 @@ class TestDelete:
         token2 = login_response.json()["access_token"]
         
         # Try to delete user1's document as user2
-        response = client.delete(
-            f"/documents/{doc_id}",
+        response = requests.delete(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token2}"}
         )
         
@@ -899,22 +893,22 @@ class TestDelete:
 class TestDocumentImageAssociation:
     """Test association between documents and images"""
     
-    def test_get_extracted_images_for_document(self, client, test_user_token):
+    def test_get_extracted_images_for_document(self, test_user_token):
         """Test retrieving extracted images for a specific document"""
         token, user_id = test_user_token
         
         # Upload a document
         pdf_filename, pdf_content = create_test_pdf()
-        pdf_response = client.post(
-            "/documents/upload",
+        pdf_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (pdf_filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         doc_id = get_id_from_response(pdf_response.json())
         
         # Get extracted images for document
-        response = client.get(
-            f"/documents/{doc_id}/images",
+        response = requests.get(
+            f"{BASE_URL}/documents/{doc_id}/images",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -932,12 +926,12 @@ class TestDocumentImageAssociation:
 class TestEdgeCases:
     """Test edge cases and error handling"""
     
-    def test_upload_empty_pdf_file(self, client, test_user_token):
+    def test_upload_empty_pdf_file(self, test_user_token):
         """Test uploading empty PDF file"""
         token, user_id = test_user_token
         
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": ("empty.pdf", io.BytesIO(b""), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -945,12 +939,12 @@ class TestEdgeCases:
         # Should fail due to invalid PDF
         assert response.status_code == 400
     
-    def test_upload_empty_image_file(self, client, test_user_token):
+    def test_upload_empty_image_file(self, test_user_token):
         """Test uploading empty image file"""
         token, user_id = test_user_token
         
-        response = client.post(
-            "/images/upload",
+        response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": ("empty.png", io.BytesIO(b""), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -958,34 +952,34 @@ class TestEdgeCases:
         # Should fail due to invalid image
         assert response.status_code == 400
     
-    def test_upload_with_special_characters_in_filename(self, client, test_user_token):
+    def test_upload_with_special_characters_in_filename(self, test_user_token):
         """Test uploading file with special characters in filename"""
         token, user_id = test_user_token
         
         filename, pdf_content = create_test_pdf("test@#$%.pdf")
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert response.status_code == 201
     
-    def test_upload_with_very_long_filename(self, client, test_user_token):
+    def test_upload_with_very_long_filename(self, test_user_token):
         """Test uploading file with very long filename"""
         token, user_id = test_user_token
         
         long_name = "a" * 200 + ".pdf"
         filename, pdf_content = create_test_pdf(long_name)
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         assert response.status_code == 201
     
-    def test_concurrent_uploads_from_same_user(self, client, test_user_token):
+    def test_concurrent_uploads_from_same_user(self, test_user_token):
         """Test uploading multiple files simultaneously"""
         token, user_id = test_user_token
         
@@ -993,8 +987,8 @@ class TestEdgeCases:
         doc_ids = []
         for i in range(3):
             filename, pdf_content = create_test_pdf(f"test{i}.pdf")
-            response = client.post(
-                "/documents/upload",
+            response = requests.post(
+                f"{BASE_URL}/documents/upload",
                 files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -1013,14 +1007,14 @@ class TestEdgeCases:
 class TestDatabaseIntegrity:
     """Test database records and integrity"""
     
-    def test_document_record_created_in_database(self, client, test_user_token):
+    def test_document_record_created_in_database(self, test_user_token):
         """Test that document record is created in MongoDB"""
         token, user_id = test_user_token
         
         # Upload a document
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1035,14 +1029,14 @@ class TestDatabaseIntegrity:
         # Filename may be the original or stored name
         assert "filename" in doc
     
-    def test_image_record_created_in_database(self, client, test_user_token):
+    def test_image_record_created_in_database(self, test_user_token):
         """Test that image record is created in MongoDB"""
         token, user_id = test_user_token
         
         # Upload an image
         filename, image_content = create_test_image()
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1058,22 +1052,22 @@ class TestDatabaseIntegrity:
         assert "filename" in img
         assert img["source_type"] == "uploaded"
     
-    def test_document_deletion_removes_database_record(self, client, test_user_token):
+    def test_document_deletion_removes_database_record(self, test_user_token):
         """Test that deleting document removes database record"""
         token, user_id = test_user_token
         
         # Upload a document
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         doc_id = get_id_from_response(upload_response.json())
         
         # Delete document
-        client.delete(
-            f"/documents/{doc_id}",
+        requests.delete(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -1090,14 +1084,14 @@ class TestDatabaseIntegrity:
 class TestStorageQuota:
     """Test suite for storage quota enforcement"""
     
-    def test_quota_info_in_document_upload_response(self, client, test_user_token):
+    def test_quota_info_in_document_upload_response(self, test_user_token):
         """Test that upload response includes storage quota information"""
         token, user_id = test_user_token
         
         # Upload a document
         filename, pdf_content = create_test_pdf()
-        response = client.post(
-            "/documents/upload",
+        response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1116,21 +1110,21 @@ class TestStorageQuota:
         total_quota = 1 * 1024 * 1024 * 1024  # 1GB
         assert data["user_storage_used"] + data["user_storage_remaining"] == total_quota
     
-    def test_quota_info_in_document_list(self, client, test_user_token):
+    def test_quota_info_in_document_list(self, test_user_token):
         """Test that document list includes quota information"""
         token, user_id = test_user_token
         
         # Upload a document
         filename, pdf_content = create_test_pdf()
-        client.post(
-            "/documents/upload",
+        requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         
         # List documents
-        response = client.get(
-            "/documents",
+        response = requests.get(
+            f"{BASE_URL}/documents",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -1143,14 +1137,14 @@ class TestStorageQuota:
             assert "user_storage_used" in doc
             assert "user_storage_remaining" in doc
     
-    def test_quota_info_in_image_upload_response(self, client, test_user_token):
+    def test_quota_info_in_image_upload_response(self, test_user_token):
         """Test that image upload response includes storage quota information"""
         token, user_id = test_user_token
         
         # Upload an image
         filename, image_content = create_test_image()
-        response = client.post(
-            "/images/upload",
+        response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1163,14 +1157,14 @@ class TestStorageQuota:
         assert "user_storage_remaining" in data
         assert data["user_storage_used"] > 0
     
-    def test_multiple_uploads_accumulate_storage(self, client, test_user_token):
+    def test_multiple_uploads_accumulate_storage(self, test_user_token):
         """Test that multiple files accumulate towards total quota"""
         token, user_id = test_user_token
         
         # Upload first document
         filename1, pdf_content1 = create_test_pdf()
-        response1 = client.post(
-            "/documents/upload",
+        response1 = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename1, io.BytesIO(pdf_content1), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1180,8 +1174,8 @@ class TestStorageQuota:
         
         # Upload an image
         img_filename, image_content = create_test_image()
-        response_img = client.post(
-            "/images/upload",
+        response_img = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (img_filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1194,14 +1188,14 @@ class TestStorageQuota:
         assert remaining_after_image <= remaining_after_first  # Remaining should decrease
 
     
-    def test_deletion_frees_storage_quota(self, client, test_user_token):
+    def test_deletion_frees_storage_quota(self, test_user_token):
         """Test that deleting a file frees up quota"""
         token, user_id = test_user_token
         
         # Upload document
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1209,15 +1203,15 @@ class TestStorageQuota:
         used_after_upload = upload_response.json()["user_storage_used"]
         
         # Delete document
-        client.delete(
-            f"/documents/{doc_id}",
+        requests.delete(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
         # Upload another document and check that quota is available
         filename2, pdf_content2 = create_test_pdf()
-        response2 = client.post(
-            "/documents/upload",
+        response2 = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename2, io.BytesIO(pdf_content2), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1230,14 +1224,14 @@ class TestStorageQuota:
         # (allowing for some variance in PDF generation)
         assert used_after_second < used_after_upload + len(pdf_content2) * 1.5
     
-    def test_image_deletion_frees_quota(self, client, test_user_token):
+    def test_image_deletion_frees_quota(self, test_user_token):
         """Test that deleting an image frees up quota"""
         token, user_id = test_user_token
         
         # Upload image
         filename, image_content = create_test_image()
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1245,16 +1239,16 @@ class TestStorageQuota:
         used_after_upload = upload_response.json()["user_storage_used"]
         
         # Delete image
-        delete_response = client.delete(
-            f"/images/{img_id}",
+        delete_response = requests.delete(
+            f"{BASE_URL}/images/{img_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         assert delete_response.status_code == 204
         
         # Upload another image and verify space is available
         filename2, image_content2 = create_test_image()
-        response2 = client.post(
-            "/images/upload",
+        response2 = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename2, io.BytesIO(image_content2), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -1264,44 +1258,44 @@ class TestStorageQuota:
         # After deletion and reupload, should be approximately one file size
         assert used_after_second < used_after_upload + len(image_content2) * 1.5
     
-    def test_quota_updated_in_list_after_deletion(self, client, test_user_token):
+    def test_quota_updated_in_list_after_deletion(self, test_user_token):
         """Test that quota info in list updates after file deletion"""
         token, user_id = test_user_token
         
         # Upload two documents
         filename1, pdf_content1 = create_test_pdf()
-        upload_response1 = client.post(
-            "/documents/upload",
+        upload_response1 = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename1, io.BytesIO(pdf_content1), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         doc_id1 = get_id_from_response(upload_response1.json())
         
         filename2, pdf_content2 = create_test_pdf()
-        upload_response2 = client.post(
-            "/documents/upload",
+        upload_response2 = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename2, io.BytesIO(pdf_content2), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         used_after_uploads = upload_response2.json()["user_storage_used"]
         
         # Get list and check quota
-        list_response = client.get(
-            "/documents",
+        list_response = requests.get(
+            f"{BASE_URL}/documents",
             headers={"Authorization": f"Bearer {token}"}
         )
         quota_before_delete = list_response.json()[0]["user_storage_used"]
         assert quota_before_delete == used_after_uploads
         
         # Delete first document
-        client.delete(
-            f"/documents/{doc_id1}",
+        requests.delete(
+            f"{BASE_URL}/documents/{doc_id1}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
         # Get list and check quota is now less (one less file)
-        list_response2 = client.get(
-            "/documents",
+        list_response2 = requests.get(
+            f"{BASE_URL}/documents",
             headers={"Authorization": f"Bearer {token}"}
         )
         quota_after_delete = list_response2.json()[0]["user_storage_used"]
@@ -1309,22 +1303,22 @@ class TestStorageQuota:
         # Quota should be reduced from original after deletion
         assert quota_after_delete < quota_before_delete
     
-    def test_get_document_includes_quota_info(self, client, test_user_token):
+    def test_get_document_includes_quota_info(self, test_user_token):
         """Test that getting single document includes quota information"""
         token, user_id = test_user_token
         
         # Upload document
         filename, pdf_content = create_test_pdf()
-        upload_response = client.post(
-            "/documents/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/documents/upload",
             files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
             headers={"Authorization": f"Bearer {token}"}
         )
         doc_id = get_id_from_response(upload_response.json())
         
         # Get single document
-        response = client.get(
-            f"/documents/{doc_id}",
+        response = requests.get(
+            f"{BASE_URL}/documents/{doc_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -1334,22 +1328,22 @@ class TestStorageQuota:
         assert "user_storage_remaining" in data
         assert data["user_storage_used"] > 0
     
-    def test_get_image_includes_quota_info(self, client, test_user_token):
+    def test_get_image_includes_quota_info(self, test_user_token):
         """Test that getting single image includes quota information"""
         token, user_id = test_user_token
         
         # Upload image
         filename, image_content = create_test_image()
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
         img_id = get_id_from_response(upload_response.json())
         
         # Get single image
-        response = client.get(
-            f"/images/{img_id}",
+        response = requests.get(
+            f"{BASE_URL}/images/{img_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         

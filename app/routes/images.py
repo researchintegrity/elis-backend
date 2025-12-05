@@ -10,10 +10,7 @@ from pathlib import Path
 
 from app.schemas import (
     ImageResponse,
-    ImageTypeListResponse,
     ImageTypesUpdateRequest,
-    CopyMoveAnalysisRequest,
-    MessageResponse
 )
 from app.db.mongodb import get_images_collection, get_documents_collection
 from app.utils.security import get_current_user
@@ -25,7 +22,7 @@ from app.utils.file_storage import (
 )
 from app.utils.metadata_parser import extract_exif_metadata
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
-from app.config.settings import resolve_workspace_path
+from app.config.settings import convert_host_path_to_container
 from app.services.image_service import delete_image_and_artifacts, list_images as list_images_service
 from app.services.resource_helpers import get_owned_resource
 from app.services.quota_helpers import augment_with_quota
@@ -158,38 +155,36 @@ async def upload_image(
         image_id = result.inserted_id
         
         # Rename file to use MongoDB _id
-        file_ext = os.path.splitext(file.filename)[1]
-        new_filename = f"{image_id}{file_ext}"
+        file_ext = Path(file.filename).suffix
+        new_filename = Path(file.filename).with_name(f"{image_id}{file_ext}")
         
-        # Construct full paths
-        if not os.path.isabs(file_path):
-            old_full_path = os.path.join(os.getcwd(), file_path)
-        else:
-            old_full_path = file_path
+        # Construct full paths using pathlib
+        old_path = Path(file_path)
+        if not old_path.is_absolute():
+            old_path = Path.cwd() / old_path
         
-        new_full_path = os.path.join(os.path.dirname(old_full_path), new_filename)
+        new_full_path = old_path.parent / new_filename
         
         try:
-            os.rename(old_full_path, new_full_path)
+            old_path.rename(new_full_path)
         except OSError as e:
             # Delete MongoDB doc since we can't rename the file
             images_col.delete_one({"_id": image_id})
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to rename uploaded file: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to rename uploaded file: {str(e)}"
             )
         
-        # Update MongoDB with new filename and workspace-relative path
-        workspace_relative_path = convert_container_path_to_host(
-            os.path.join(os.path.dirname(file_path), new_filename)
-        )
-        
+        # Update MongoDB with new filename with container-compatible path
+        # ISSUE IS HERE
+        file_path = Path(file_path).parent / new_filename
+        storage_path = convert_host_path_to_container(file_path)
         images_col.update_one(
             {"_id": image_id},
             {
                 "$set": {
-                    "filename": new_filename,
-                    "file_path": workspace_relative_path
+                    "filename": str(new_filename),
+                    "file_path": str(storage_path)
                 }
             }
         )
@@ -323,8 +318,7 @@ async def download_image(
     )
     
     # Check if file exists - resolve workspace path to actual filesystem path
-    stored_path = img["file_path"]
-    file_path = resolve_workspace_path(stored_path)
+    file_path = img["file_path"]
     if not Path(file_path).exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -837,80 +831,3 @@ async def list_all_image_types(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve image types: {str(e)}"
         )
-
-
-from app.schemas import (
-    ImageResponse,
-    ImageCreate,
-    MessageResponse,
-    CopyMoveAnalysisRequest,
-    AnalysisType,
-    AnalysisStatus
-)
-from app.db.mongodb import get_images_collection, get_analyses_collection
-from app.tasks.copy_move_detection import detect_copy_move
-from datetime import datetime
-
-# ...existing code...
-
-@router.post("/{image_id}/analyze/copy-move", status_code=status.HTTP_202_ACCEPTED, response_model=dict)
-async def analyze_copy_move(
-    image_id: str,
-    request: CopyMoveAnalysisRequest,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Start copy-move detection analysis on an image.
-    
-    Args:
-        image_id: ID of the image to analyze
-        request: Analysis configuration (method)
-        current_user: Current authenticated user
-        
-    Returns:
-        Dict with analysis_id and message
-    """
-    user_id_str = str(current_user["_id"])
-    
-    # Verify ownership
-    image = await get_owned_resource(
-        get_images_collection,
-        image_id,
-        user_id_str,
-        "Image"
-    )
-    
-    # Create Analysis document
-    analyses_col = get_analyses_collection()
-    analysis_doc = {
-        "type": AnalysisType.SINGLE_IMAGE_COPY_MOVE,
-        "user_id": user_id_str,
-        "source_image_id": image_id,
-        "status": AnalysisStatus.PENDING,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-        "method": request.method
-    }
-    result = analyses_col.insert_one(analysis_doc)
-    analysis_id = str(result.inserted_id)
-    
-    # Update Image document with analysis_id
-    images_col = get_images_collection()
-    images_col.update_one(
-        {"_id": ObjectId(image_id)},
-        {"$addToSet": {"analysis_ids": analysis_id}}
-    )
-    
-    # Trigger task with analysis_id
-    detect_copy_move.delay(
-        analysis_id=analysis_id,
-        image_id=image_id,
-        user_id=user_id_str,
-        image_path=resolve_workspace_path(image["file_path"]),
-        method=request.method
-    )
-    
-    return {
-        "message": "Copy-move analysis started",
-        "analysis_id": analysis_id
-    }

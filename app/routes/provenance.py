@@ -4,14 +4,12 @@ Provenance Analysis Routes
 Provides endpoints for triggering provenance analysis.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Optional, List
 from datetime import datetime
 from bson import ObjectId
 
 from app.utils.security import get_current_user
 from app.db.mongodb import get_images_collection, get_analyses_collection
 from app.schemas import (
-    AnalysisType,
     AnalysisStatus,
 )
 from app.utils.docker_provenance import check_provenance_health

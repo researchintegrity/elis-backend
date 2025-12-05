@@ -25,6 +25,7 @@ def auth_token():
     try:
         requests.post(f"{BASE_URL}/auth/register", json=register_data)
     except Exception:
+        # Ignore error if user already exists
         pass
 
     # 2. Login
@@ -100,7 +101,6 @@ def poll_analysis(auth_token, analysis_id, timeout=120):
 def test_provenance_analysis_e2e(auth_token, uploaded_image_ids):
     """Test full provenance analysis flow"""
     query_image_id = uploaded_image_ids[0]
-    target_image_id = uploaded_image_ids[1]
     
     headers = {"Authorization": f"Bearer {auth_token}"}
     

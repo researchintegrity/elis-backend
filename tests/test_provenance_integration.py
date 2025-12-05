@@ -5,7 +5,6 @@ import pytest
 from unittest.mock import patch, MagicMock
 from app.services.provenance_service import run_provenance_analysis
 from app.tasks.provenance import provenance_analysis_task
-from app.utils.docker_provenance import analyze_provenance
 
 @pytest.fixture
 def mock_db_collection():

@@ -5,7 +5,7 @@ Provides high-level operations for Content-Based Image Retrieval,
 including indexing images from the database and searching.
 """
 import logging
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 from bson import ObjectId
 
@@ -14,10 +14,6 @@ from app.utils.docker_cbir import (
     index_image,
     index_images_batch,
     search_similar_images,
-    search_similar_images_upload,
-    delete_image_from_index,
-    delete_images_batch,
-    check_images_indexed,
     check_cbir_health,
 )
 

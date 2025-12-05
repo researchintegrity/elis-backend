@@ -1,6 +1,7 @@
 """
 Docker-based PDF image extraction using pdf-extractor container
 """
+from pathlib import Path
 import subprocess
 import os
 import logging
@@ -10,12 +11,11 @@ from app.config.settings import (
     DOCKER_EXTRACTION_TIMEOUT,
     DOCKER_COMPOSE_EXTRACTION_TIMEOUT,
     DOCKER_IMAGE_CHECK_TIMEOUT,
-    APP_WORKSPACE_PREFIX,
-    EXTRACTION_SUBDIRECTORY,
     SUPPORTED_IMAGE_EXTENSIONS,
     IMAGE_MIME_TYPES,
+    convert_container_path_to_host,
     is_container_path,
-    get_container_path_length,
+    CONTAINER_WORKSPACE_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,28 +71,9 @@ def extract_images_with_docker(
     try:
         # Validate PDF file exists
         if not os.path.exists(pdf_file_path):
-            # Try to resolve relative path if it starts with workspace/
-            if pdf_file_path.startswith("workspace/"):
-                 workspace_root = os.getenv("WORKSPACE_PATH", os.path.abspath("workspace"))
-                 rel_path = pdf_file_path[len("workspace/"):]
-                 abs_path = os.path.join(workspace_root, rel_path)
-                 
-                 if os.path.exists(abs_path):
-                     pdf_file_path = abs_path
-                 else:
-                     if os.path.exists(os.path.abspath(pdf_file_path)):
-                         pdf_file_path = os.path.abspath(pdf_file_path)
-                     else:
-                         if os.path.exists(os.path.join(os.getcwd(), pdf_file_path)):
-                             pdf_file_path = os.path.join(os.getcwd(), pdf_file_path)
-                         else:
-                             error_msg = f"PDF file not found: {pdf_file_path}"
-                             logger.error(error_msg)
-                             return 0, [error_msg], []
-            else:
-                error_msg = f"PDF file not found: {pdf_file_path}"
-                logger.error(error_msg)
-                return 0, [error_msg], []
+            error_msg = f"PDF file not found: {pdf_file_path}"
+            logger.error(error_msg)
+            return 0, [error_msg], []
         
         # Convert to absolute paths for Docker
         pdf_file_path = os.path.abspath(pdf_file_path)
@@ -116,69 +97,13 @@ def extract_images_with_docker(
             f"  PDF filename: {pdf_filename}\n"
             f"  Output dir: {output_dir}\n"
             f"  is_container_path: {is_container_path(pdf_dir)}\n"
-            f"  WORKSPACE_PATH env: {os.getenv('WORKSPACE_PATH')}"
+            f"  CONTAINER_WORKSPACE_PATH: {CONTAINER_WORKSPACE_PATH}"
         )
         
         # Handle Docker running inside a container vs on the host:
-        # 
-        # In host environment (running tests locally):
-        #   - pdf_file_path will be relative like "workspace/user/pdfs/file.pdf"
-        #   - After abspath() it becomes: "/current/working/dir/workspace/user/pdfs/file.pdf"
-        #   - We pass this directly to Docker since Docker daemon is on same host
-        #
-        # In container environment (Celery worker in Docker):
-        #   - pdf_file_path will be like "/workspace/user/pdfs/file.pdf"
-        #   - Docker daemon is on the host, needs the actual host path
-        #   - We need to convert using WORKSPACE_PATH environment variable
-        
-        host_pdf_dir = pdf_dir
-        host_output_dir = output_dir
-        
-        # If path starts with /workspace, we're in the worker container
-        workspace_path = os.getenv("HOST_WORKSPACE_PATH")
-        container_path_len = get_container_path_length()
-        
-        logger.debug(f"Path analysis: container_path_len={container_path_len}, is_container={is_container_path(pdf_dir)}")
-        
-        if is_container_path(pdf_dir):
-            # We're running in the worker container, need to convert paths for Docker daemon on host
-            logger.info(f"Detected container environment. Converting paths for host Docker daemon")
-            
-            if not workspace_path:
-                error_msg = "HOST_WORKSPACE_PATH environment variable not set"
-                logger.error(error_msg)
-                extraction_errors.append(error_msg)
-                return 0, extraction_errors, []
-            
-            # Convert: /workspace/user_id/pdfs/... → /host/path/workspace/user_id/pdfs/...
-            # Example: /workspace/abc123/pdfs/file.pdf
-            # Get relative path: abc123/pdfs
-            rel_path = pdf_dir[container_path_len:]  # Remove /workspace prefix
-            host_pdf_dir = workspace_path + rel_path
-            
-            # Do the same for output directory
-            rel_output = output_dir[container_path_len:]
-            host_output_dir = workspace_path + rel_output
-            
-            logger.debug(
-                f"Container path conversion:\n"
-                f"  Original PDF dir: {pdf_dir}\n"
-                f"  Relative path: {rel_path}\n"
-                f"  WORKSPACE_PATH: {workspace_path}\n"
-                f"  Host PDF dir: {host_pdf_dir}\n"
-                f"  Host output dir: {host_output_dir}"
-            )
-        else:
-            # Running on host directly or in non-container environment
-            logger.info(f"Detected host environment. Using paths as-is")
-        
-        logger.debug(
-            f"Docker extraction starting for doc_id={doc_id}\n"
-            f"  Using PDF dir: {host_pdf_dir}\n"
-            f"  Using output dir: {host_output_dir}"
-        )
-        
-                      
+        host_pdf_dir = convert_container_path_to_host(Path(pdf_dir))
+        host_output_dir = convert_container_path_to_host(Path(output_dir))
+
         # Build Docker command with host paths
         # These paths will be mounted by Docker daemon running on the host
         docker_command = [
@@ -228,17 +153,12 @@ def extract_images_with_docker(
                 filepath = os.path.join(output_dir, filename)
                 file_size = os.path.getsize(filepath)
                 
-                # Determine MIME type based on extension
-                ext = os.path.splitext(filename)[1].lower()
+                ext = Path(filename).suffix.lower()
                 mime_type = IMAGE_MIME_TYPES.get(ext, 'image/unknown')
-                
-                # Store relative path for database (with workspace/ prefix for consistency with PDFs)
-                # This matches the format used for uploaded PDFs: workspace/user_id/images/extracted/doc_id/filename
-                rel_path = f"workspace/{user_id}/{EXTRACTION_SUBDIRECTORY}/{doc_id}/{filename}"
-                
+
                 extracted_file_list.append({
-                    'filename': filename,
-                    'path': rel_path,
+                    'filename': str(filename),
+                    'path': str(filepath),
                     'size': file_size,
                     'mime_type': mime_type
                 })
