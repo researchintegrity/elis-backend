@@ -6,8 +6,6 @@ from typing import Dict, List, Any, Optional
 from bson import ObjectId
 from app.db.mongodb import get_images_collection
 from app.tasks.panel_extraction import extract_panels_from_images
-from app.config.settings import resolve_workspace_path
-
 logger = logging.getLogger(__name__)
 
 
@@ -83,8 +81,6 @@ def initiate_panel_extraction(
             if not file_path:
                 raise ValueError(f"Image document has no file_path: {img_id}")
 
-            # Resolve to absolute filesystem path
-            # resolved_path = resolve_workspace_path(file_path)
             image_paths.append(file_path)
             validated_ids.append(img_id)
 

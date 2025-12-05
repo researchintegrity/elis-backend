@@ -22,7 +22,7 @@ from app.utils.file_storage import (
 )
 from app.utils.metadata_parser import extract_exif_metadata
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
-from app.config.settings import resolve_workspace_path, convert_host_path_to_container
+from app.config.settings import convert_host_path_to_container
 from app.services.image_service import delete_image_and_artifacts, list_images as list_images_service
 from app.services.resource_helpers import get_owned_resource
 from app.services.quota_helpers import augment_with_quota

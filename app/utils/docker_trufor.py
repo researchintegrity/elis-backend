@@ -13,8 +13,6 @@ from app.config.settings import (
     TRUFOR_DOCKER_IMAGE,
     TRUFOR_TIMEOUT,
     TRUFOR_USE_GPU,
-    resolve_workspace_path,
-    CONTAINER_WORKSPACE_PATH,
     HOST_WORKSPACE_PATH
 )
 from app.utils.file_storage import get_analysis_output_path
@@ -49,11 +47,7 @@ def run_trufor_detection_with_docker(
 
     if not os.path.exists(image_path):
         # Try to resolve path using centralized utility
-        resolved_path = resolve_workspace_path(image_path)
-        if os.path.exists(resolved_path):
-            image_path = resolved_path
-        else:
-            return False, f"Source image file not found: {image_path}", results
+        return False, f"Source image file not found: {image_path}", results
     
     # Ensure absolute path
     image_path = os.path.abspath(image_path)

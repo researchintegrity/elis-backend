@@ -18,7 +18,6 @@ from app.config.settings import (
     convert_host_path_to_container,
     PANEL_EXTRACTOR_DOCKER_IMAGE,
     PANEL_EXTRACTION_DOCKER_WORKDIR,
-    resolve_workspace_path,
     CONTAINER_WORKSPACE_PATH,
     HOST_WORKSPACE_PATH
 )

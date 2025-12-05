@@ -11,7 +11,7 @@ from bson import ObjectId
 from datetime import datetime
 import logging
 from pathlib import Path
-import os
+
 
 logger = logging.getLogger(__name__)
 

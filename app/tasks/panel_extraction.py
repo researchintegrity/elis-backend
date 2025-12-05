@@ -14,8 +14,7 @@ from app.config.settings import (
     CELERY_MAX_RETRIES, 
     CELERY_RETRY_BACKOFF_BASE,
     convert_container_path_to_host,
-    convert_host_path_to_container,
-    resolve_workspace_path
+    convert_host_path_to_container
 )
 
 logger = logging.getLogger(__name__)
@@ -134,8 +133,7 @@ def extract_panels_from_images(
                     panel_doc_file = images_col.find_one({"_id": panel_mongodb_id})
                     original_file_path = panel_doc_file.get("file_path")
                     
-                    # Resolve workspace path properly (handles workspace/... -> /workspace/...)
-                    # full_old_path = resolve_workspace_path(original_file_path)
+                    # Convert host path to container path
                     full_old_path = convert_host_path_to_container(original_file_path)
                     
                     # New filename using _id

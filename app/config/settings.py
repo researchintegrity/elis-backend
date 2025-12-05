@@ -198,16 +198,6 @@ def is_container_path(path: Path) -> bool:
     """
     return Path(path).is_relative_to(CONTAINER_WORKSPACE_PATH)
 
-def get_container_path_length() -> int:
-    """
-    Get the length of the container path prefix.
-    
-    Returns:
-        Length of the container path prefix string.
-    """
-    raise NotImplementedError("FUNC: get_container_path_length This function will not be implemented")
-    return len(str(CONTAINER_WORKSPACE_PATH))
-
 def convert_container_path_to_host(container_path: Path) -> Path:
     """
     Convert a container path to a relative workspace path.
@@ -250,26 +240,3 @@ def convert_host_path_to_container(path: Path) -> Path:
     except ValueError:
         raise ValueError(f"Path {path} is not under host workspace path {HOST_WORKSPACE_PATH}")
     return CONTAINER_WORKSPACE_PATH / rel_path
-
-
-def resolve_workspace_path(stored_path: str) -> str:
-    """
-    Resolve a stored workspace path to the actual filesystem path.
-    
-    Stored paths in the database may be in relative format like:
-    - "workspace/user_id/images/..." (relative, for portability)
-    
-    This function converts them to the actual filesystem path based on
-    the current WORKSPACE_PATH setting.
-    
-    Args:
-        stored_path: Path as stored in the database
-        
-    Returns:
-        Absolute filesystem path that can be used for file operations
-        
-    Examples:
-        workspace/user_id/images/test.jpg → /workspace/user_id/images/test.jpg
-        /workspace/user_id/images/test.jpg → /workspace/user_id/images/test.jpg (unchanged)
-    """
-    raise NotImplementedError("FUNC: resolve_workspace_path This function will not be implemented")

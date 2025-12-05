@@ -12,7 +12,6 @@ from app.config.settings import (
     convert_container_path_to_host,
     COPY_MOVE_DETECTION_DOCKER_IMAGE,
     COPY_MOVE_DETECTION_TIMEOUT,
-    resolve_workspace_path,
     CONTAINER_WORKSPACE_PATH,
     HOST_WORKSPACE_PATH
 )
