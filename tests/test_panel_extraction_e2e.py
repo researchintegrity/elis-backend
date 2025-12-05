@@ -18,15 +18,21 @@ These tests require Docker containers to be running:
 """
 
 import pytest
+import requests
 import os
 import io
 from datetime import datetime
-from fastapi.testclient import TestClient
 from bson import ObjectId
 from unittest.mock import patch, MagicMock
 
-from app.main import app
 from app.db.mongodb import get_images_collection, db_connection
+from app.config.settings import (
+    CONTAINER_WORKSPACE_PATH,
+    HOST_WORKSPACE_PATH,
+)
+
+# Configuration
+BASE_URL = os.getenv("API_URL", "http://localhost:8000")
 
 
 # ============================================================================
@@ -62,14 +68,20 @@ def mock_celery_tasks_globally():
         yield mock_task
 
 
-@pytest.fixture
-def client():
-    """Create test client"""
-    return TestClient(app)
+@pytest.fixture(autouse=True)
+def cleanup_database():
+    """Cleanup database collections after each test"""
+    yield
+    # Clean up collections
+    try:
+        images_col = get_images_collection()
+        images_col.delete_many({})
+    except Exception:
+        pass
 
 
 @pytest.fixture
-def test_user_token(client):
+def test_user_token():
     """Register and login a test user, return auth token"""
     import uuid
     unique_id = str(uuid.uuid4())[:8]
@@ -77,8 +89,8 @@ def test_user_token(client):
     email = f"paneltest_{unique_id}@example.com"
     
     # Register user
-    register_response = client.post(
-        "/auth/register",
+    register_response = requests.post(
+        f"{BASE_URL}/auth/register",
         json={
             "username": username,
             "email": email,
@@ -90,8 +102,8 @@ def test_user_token(client):
     assert register_response.status_code == 200, f"Register failed: {register_response.text}"
     
     # Login
-    login_response = client.post(
-        "/auth/login",
+    login_response = requests.post(
+        f"{BASE_URL}/auth/login",
         data={"username": username, "password": "TestPassword123"}
     )
     
@@ -169,13 +181,13 @@ def get_id_from_response(data):
 class TestImageUploadForPanelExtraction:
     """Test image upload functionality required for panel extraction"""
     
-    def test_upload_image_for_panel_extraction(self, client, test_user_token):
+    def test_upload_image_for_panel_extraction(self, test_user_token):
         """Test uploading an image that can be used for panel extraction"""
         token, user_id = test_user_token
         filename, image_content = create_test_jpeg()
         
-        response = client.post(
-            "/images/upload",
+        response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/jpeg")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -186,13 +198,13 @@ class TestImageUploadForPanelExtraction:
         assert data["source_type"] == "uploaded"
         assert get_id_from_response(data) is not None
     
-    def test_upload_png_image(self, client, test_user_token):
+    def test_upload_png_image(self, test_user_token):
         """Test uploading PNG image for panel extraction"""
         token, user_id = test_user_token
         filename, image_content = create_test_image("test_figure.png")
         
-        response = client.post(
-            "/images/upload",
+        response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/png")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -215,8 +227,8 @@ class TestPanelExtractionInitiation:
         
         # First upload an image
         filename, image_content = create_test_jpeg("figure_for_extraction.jpg")
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/jpeg")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -228,8 +240,8 @@ class TestPanelExtractionInitiation:
             mock_task.delay.return_value.id = "mock-panel-task-id"
             
             # Initiate panel extraction
-            response = client.post(
-                "/images/extract-panels",
+            response = requests.post(
+                f"{BASE_URL}/images/extract-panels",
                 json={"image_ids": [image_id]},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -244,8 +256,8 @@ class TestPanelExtractionInitiation:
         """Test that empty image_ids list returns error"""
         token, user_id = test_user_token
         
-        response = client.post(
-            "/images/extract-panels",
+        response = requests.post(
+            f"{BASE_URL}/images/extract-panels",
             json={"image_ids": []},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -267,8 +279,8 @@ class TestPanelExtractionInitiation:
         with patch('app.services.panel_extraction_service.extract_panels_from_images') as mock_task:
             mock_task.delay.return_value.id = "mock-panel-task-id"
             
-            response = client.post(
-                "/images/extract-panels",
+            response = requests.post(
+                f"{BASE_URL}/images/extract-panels",
                 json={"image_ids": [fake_id]},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -278,8 +290,8 @@ class TestPanelExtractionInitiation:
     
     def test_initiate_panel_extraction_without_auth(self, client):
         """Test that panel extraction requires authentication"""
-        response = client.post(
-            "/images/extract-panels",
+        response = requests.post(
+            f"{BASE_URL}/images/extract-panels",
             json={"image_ids": [str(ObjectId())]}
         )
         
@@ -293,8 +305,8 @@ class TestPanelExtractionInitiation:
         # Upload multiple images
         for i in range(3):
             filename, image_content = create_test_jpeg(f"figure_{i}.jpg")
-            upload_response = client.post(
-                "/images/upload",
+            upload_response = requests.post(
+                f"{BASE_URL}/images/upload",
                 files={"file": (filename, io.BytesIO(image_content), "image/jpeg")},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -305,8 +317,8 @@ class TestPanelExtractionInitiation:
         with patch('app.services.panel_extraction_service.extract_panels_from_images') as mock_task:
             mock_task.delay.return_value.id = "mock-multi-image-task-id"
             
-            response = client.post(
-                "/images/extract-panels",
+            response = requests.post(
+                f"{BASE_URL}/images/extract-panels",
                 json={"image_ids": image_ids},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -330,8 +342,8 @@ class TestPanelExtractionStatus:
         
         # Upload an image and initiate extraction
         filename, image_content = create_test_jpeg()
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/jpeg")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -341,8 +353,8 @@ class TestPanelExtractionStatus:
         with patch('app.services.panel_extraction_service.extract_panels_from_images') as mock_task:
             mock_task.delay.return_value.id = "pending-task-id"
             
-            init_response = client.post(
-                "/images/extract-panels",
+            init_response = requests.post(
+                f"{BASE_URL}/images/extract-panels",
                 json={"image_ids": [image_id]},
                 headers={"Authorization": f"Bearer {token}"}
             )
@@ -359,8 +371,8 @@ class TestPanelExtractionStatus:
                 "message": "Task is pending"
             }
             
-            status_response = client.get(
-                f"/images/extract-panels/status/{task_id}",
+            status_response = requests.get(
+                f"{BASE_URL}/images/extract-panels/status/{task_id}",
                 headers={"Authorization": f"Bearer {token}"}
             )
         
@@ -384,8 +396,8 @@ class TestPanelExtractionStatus:
                 "message": "Task not found or still pending"
             }
             
-            response = client.get(
-                f"/images/extract-panels/status/{fake_task_id}",
+            response = requests.get(
+                f"{BASE_URL}/images/extract-panels/status/{fake_task_id}",
                 headers={"Authorization": f"Bearer {token}"}
             )
         
@@ -406,8 +418,8 @@ class TestPanelRetrieval:
         
         # First, upload a source image
         filename, image_content = create_test_jpeg("source_for_panels.jpg")
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/jpeg")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -423,7 +435,7 @@ class TestPanelRetrieval:
             panel_doc = {
                 "user_id": user_id,
                 "filename": f"panel_{i}.png",
-                "file_path": f"workspace/{user_id}/images/panels/{source_image_id}/panel_{i}.png",
+                "file_path": f"{CONTAINER_WORKSPACE_PATH}/{user_id}/images/panels/{source_image_id}/panel_{i}.png",
                 "file_size": 1024 * (i + 1),
                 "source_type": "panel",
                 "source_image_id": source_image_id,
@@ -435,9 +447,10 @@ class TestPanelRetrieval:
             result = images_col.insert_one(panel_doc)
             panel_docs.append(str(result.inserted_id))
         
+        
         # Retrieve panels for the source image
-        response = client.get(
-            f"/images/{source_image_id}/panels",
+        response = requests.get(
+            f"{BASE_URL}/images/{source_image_id}/panels",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -462,8 +475,8 @@ class TestPanelRetrieval:
         
         # First upload a source image
         filename, image_content = create_test_jpeg("source_image.jpg")
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/jpeg")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -475,7 +488,7 @@ class TestPanelRetrieval:
         panel_doc = {
             "user_id": user_id,
             "filename": "filter_test_panel.png",
-            "file_path": f"workspace/{user_id}/images/panels/{source_image_id}/filter_test_panel.png",
+            "file_path": f"{CONTAINER_WORKSPACE_PATH}/{user_id}/images/panels/{source_image_id}/filter_test_panel.png",
             "file_size": 1024,
             "source_type": "panel",
             "source_image_id": source_image_id,
@@ -493,8 +506,8 @@ class TestPanelRetrieval:
         assert panel_in_db["source_type"] == "panel"
         
         # Retrieve panels via the /{image_id}/panels endpoint
-        response = client.get(
-            f"/images/{source_image_id}/panels",
+        response = requests.get(
+            f"{BASE_URL}/images/{source_image_id}/panels",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -527,7 +540,7 @@ class TestPanelDocumentStructure:
         panel_doc = {
             "user_id": user_id,
             "filename": "test_panel.png",
-            "file_path": f"workspace/{user_id}/images/panels/{source_image_id}/test_panel.png",
+            "file_path": f"{CONTAINER_WORKSPACE_PATH}/{user_id}/images/panels/{source_image_id}/test_panel.png",
             "file_size": 2048,
             "source_type": "panel",
             "source_image_id": source_image_id,
@@ -540,8 +553,8 @@ class TestPanelDocumentStructure:
         panel_id = str(result.inserted_id)
         
         # Retrieve the panel
-        response = client.get(
-            f"/images/{panel_id}",
+        response = requests.get(
+            f"{BASE_URL}/images/{panel_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -570,7 +583,7 @@ class TestPanelDocumentStructure:
         panel_doc = {
             "user_id": user_id,
             "filename": "bbox_test_panel.png",
-            "file_path": f"workspace/{user_id}/images/panels/bbox_test_panel.png",
+            "file_path": f"{CONTAINER_WORKSPACE_PATH}/{user_id}/images/panels/bbox_test_panel.png",
             "file_size": 1024,
             "source_type": "panel",
             "source_image_id": source_image_id,
@@ -582,8 +595,8 @@ class TestPanelDocumentStructure:
         result = images_col.insert_one(panel_doc)
         panel_id = str(result.inserted_id)
         
-        response = client.get(
-            f"/images/{panel_id}",
+        response = requests.get(
+            f"{BASE_URL}/images/{panel_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -622,7 +635,7 @@ class TestPanelDeletion:
         panel_doc = {
             "user_id": user_id,
             "filename": "delete_test_panel.png",
-            "file_path": f"workspace/{user_id}/images/panels/delete_test_panel.png",
+            "file_path": f"{CONTAINER_WORKSPACE_PATH}/{user_id}/images/panels/delete_test_panel.png",
             "file_size": 512,
             "source_type": "panel",
             "source_image_id": source_image_id,
@@ -635,8 +648,8 @@ class TestPanelDeletion:
         panel_id = str(result.inserted_id)
         
         # Delete the panel
-        response = client.delete(
-            f"/images/{panel_id}",
+        response = requests.delete(
+            f"{BASE_URL}/images/{panel_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -646,8 +659,8 @@ class TestPanelDeletion:
         
         # If deletion succeeded, verify panel is deleted from database
         if response.status_code == 200:
-            verify_response = client.get(
-                f"/images/{panel_id}",
+            verify_response = requests.get(
+                f"{BASE_URL}/images/{panel_id}",
                 headers={"Authorization": f"Bearer {token}"}
             )
             assert verify_response.status_code == 404
@@ -667,7 +680,7 @@ class TestPanelDeletion:
         panel_doc = {
             "user_id": other_user_id,  # Different user
             "filename": "other_user_panel.png",
-            "file_path": f"workspace/{other_user_id}/images/panels/other_user_panel.png",
+            "file_path": f"{CONTAINER_WORKSPACE_PATH}/{other_user_id}/images/panels/other_user_panel.png",
             "file_size": 512,
             "source_type": "panel",
             "source_image_id": source_image_id,
@@ -679,8 +692,8 @@ class TestPanelDeletion:
         panel_id = str(result.inserted_id)
         
         # Try to delete - should fail
-        response = client.delete(
-            f"/images/{panel_id}",
+        response = requests.delete(
+            f"{BASE_URL}/images/{panel_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
@@ -703,8 +716,8 @@ class TestPanelSourceImageIntegration:
         
         # Upload a source image
         filename, image_content = create_test_jpeg("source_image.jpg")
-        upload_response = client.post(
-            "/images/upload",
+        upload_response = requests.post(
+            f"{BASE_URL}/images/upload",
             files={"file": (filename, io.BytesIO(image_content), "image/jpeg")},
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -720,7 +733,7 @@ class TestPanelSourceImageIntegration:
             panel_doc = {
                 "user_id": user_id,
                 "filename": f"panel_{i}.png",
-                "file_path": f"workspace/{user_id}/images/panels/{source_image_id}/panel_{i}.png",
+                "file_path": f"{CONTAINER_WORKSPACE_PATH}/{user_id}/images/panels/{source_image_id}/panel_{i}.png",
                 "file_size": 1024,
                 "source_type": "panel",
                 "source_image_id": source_image_id,
@@ -738,8 +751,8 @@ class TestPanelSourceImageIntegration:
         )
         
         # Retrieve source image and verify image_type
-        response = client.get(
-            f"/images/{source_image_id}",
+        response = requests.get(
+            f"{BASE_URL}/images/{source_image_id}",
             headers={"Authorization": f"Bearer {token}"}
         )
         
