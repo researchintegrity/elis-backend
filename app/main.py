@@ -1,6 +1,5 @@
 """
-ELIS User Management System
-FastAPI application with MongoDB authentication
+ELIS Scientific Image Analysis System
 """
 
 from fastapi import FastAPI
@@ -11,8 +10,8 @@ from app.db.mongodb import db_connection
 
 # Create FastAPI app
 app = FastAPI(
-    title="ELIS User Management System",
-    description="User authentication and management with MongoDB",
+    title="ELIS Scientific Image Analysis System",
+    description="A backed-end service for Image Analysis",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -107,14 +106,14 @@ async def health_check() -> dict:
         return {
             "status": "healthy",
             "database": "connected",
-            "version": "1.0.0"
+            "version": "0.0.1"
         }
     except Exception as e:
         return {
             "status": "unhealthy",
             "database": "disconnected",
             "error": str(e),
-            "version": "1.0.0"
+            "version": "0.0.1"
         }
 
 
