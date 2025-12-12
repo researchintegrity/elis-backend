@@ -212,13 +212,22 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
             }
         )
         
-        return {
+        status = "success" if extraction_status=="completed" else "failed"
+        result = {
             "doc_id": doc_id,
-            "status": "success",
+            "status": status,
             "extracted_count": extracted_count,
             "errors": extraction_errors,
             "completed_at": datetime.utcnow().isoformat()
         }
+        
+        # If extraction failed, raise an exception to make the Celery task state FAILURE
+        if extraction_status in ["failed", "completed_with_errors"]:
+            error_message = f"Image extraction {extraction_status}: {extraction_errors}"
+            logger.error(error_message)
+            raise ValueError(error_message)
+        
+        return result
         
     except SoftTimeLimitExceeded:
         logger.error(f"Task timeout for doc_id={doc_id}")
@@ -232,12 +241,24 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
             }
         )
         raise
-        
+
     except Exception as exc:
         logger.error(f"Extraction error for doc_id={doc_id}: {str(exc)}", exc_info=True)
         
         # Retry with exponential backoff
-        countdown = 60 * (CELERY_RETRY_BACKOFF_BASE ** self.request.retries)
+        if self.request.retries >= CELERY_MAX_RETRIES:
+            logger.error(f"Max retries reached for doc_id={doc_id}. Marking as failed.")
+            documents_col.update_one(
+                {"_id": ObjectId(doc_id)},
+                {
+                    "$set": {
+                        "extraction_status": "failed",
+                        "extraction_errors": [f"Max retries reached: {str(exc)}"]
+                    }
+                }
+            )
+            raise exc
+        countdown = 5 * (CELERY_RETRY_BACKOFF_BASE ** self.request.retries)
         logger.info(f"Retrying in {countdown} seconds (attempt {self.request.retries + 1}/{CELERY_MAX_RETRIES})")
         
         raise self.retry(exc=exc, countdown=countdown)
