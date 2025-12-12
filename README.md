@@ -95,7 +95,6 @@ For development or to build custom Docker images, you can clone the individual m
 cd system_modules
 git clone https://github.com/researchintegrity/cbir-system.git
 git clone https://github.com/researchintegrity/copy-move-detection.git
-git clone https://github.com/researchintegrity/copy-move-detection-keypoint.git
 git clone https://github.com/researchintegrity/front-end-platform.git
 git clone https://github.com/researchintegrity/panel-extractor.git
 git clone https://github.com/researchintegrity/pdf-image-extraction.git
