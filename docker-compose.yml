@@ -294,6 +294,7 @@ services:
     build:
       context: system_modules/panel-extractor
       dockerfile: Dockerfile.minimal
+      # for gpu support, use Dockerfile.gpu
     profiles: ["tools"]
 
   copy-move-detection:
@@ -305,8 +306,8 @@ services:
   trufor:
     image: trufor:latest
     build:
-      context: system_modules/TruFor
-      dockerfile: docker/Dockerfile
+      context: system_modules/TruFor/docker
+      dockerfile: Dockerfile
     profiles: ["tools"]
 
 volumes:

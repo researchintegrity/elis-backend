@@ -1,5 +1,5 @@
 """
-ELIS User Management System - Entry Point
+ELIS Scientific Image Analysis System
 
 This module allows running the application as a package:
     python -m app
@@ -26,10 +26,10 @@ def main():
             log_level="info"
         )
     except KeyboardInterrupt:
-        print("\n\n✋ Server shutdown requested")
+        print("Server shutdown requested")
         sys.exit(0)
     except Exception as e:
-        print(f"\n❌ Error starting server: {str(e)}")
+        print(f"Error starting server: {str(e)}")
         sys.exit(1)
 
 
