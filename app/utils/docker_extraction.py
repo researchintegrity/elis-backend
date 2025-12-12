@@ -124,11 +124,6 @@ def extract_images_with_docker(
             timeout=DOCKER_EXTRACTION_TIMEOUT
         )
         
-        # Log Docker output on errors only
-        if result.returncode != 0:
-            if result.stderr:
-                logger.warning(f"Docker error: {result.stderr}")
-        
         # Check if Docker command succeeded
         if result.returncode != 0:
             error_msg = f"Docker extraction failed with return code {result.returncode}"
