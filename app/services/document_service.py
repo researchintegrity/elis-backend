@@ -15,6 +15,10 @@ from app.utils.file_storage import (
     delete_directory,
     update_user_storage_in_db
 )
+from app.tasks.cbir import cbir_delete_image
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 async def delete_document_and_artifacts(
@@ -72,14 +76,32 @@ async def delete_document_and_artifacts(
     if not success and "Directory not found" not in error:
         raise Exception(f"Failed to delete extraction directory: {error}")
     
-    # Get all extracted image IDs for this document
-    extracted_images = images_col.find({
+    # Get all extracted image IDs for this document (with full data for CBIR cleanup)
+    extracted_images = list(images_col.find({
         "document_id": document_id,
         "user_id": user_id,
         "source_type": "extracted"
-    }, {"_id": 1})
+    }, {"_id": 1, "file_path": 1, "cbir_indexed": 1}))
     
     image_ids = [str(img["_id"]) for img in extracted_images]
+    
+    # Queue CBIR deletion for indexed images
+    cbir_deletion_count = 0
+    for img in extracted_images:
+        if img.get("cbir_indexed"):
+            try:
+                cbir_delete_image.delay(
+                    user_id=user_id,
+                    image_id=str(img["_id"]),
+                    image_path=img["file_path"]
+                )
+                cbir_deletion_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to queue CBIR deletion for image {img['_id']}: {e}")
+                # Continue with document deletion even if CBIR deletion fails to queue
+    
+    if cbir_deletion_count > 0:
+        logger.info(f"Queued CBIR deletion for {cbir_deletion_count} images from document {document_id}")
     
     # Delete annotations for all extracted images
     annotations_deleted = 0

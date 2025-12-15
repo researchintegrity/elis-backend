@@ -165,10 +165,16 @@ def enrich_search_results(
         path = result["image_path"]
         image = path_to_image.get(path)
         
+        # Note: For Inner Product (IP) metric, distance IS the similarity score (higher = more similar)
+        # For L2 metric, you would need: similarity = 1.0 / (1.0 + distance) or similar
+        # Our CBIR uses IP metric with normalized embeddings, so distance is cosine similarity
+        raw_distance = result.get("distance", 0)
+        similarity = max(0.0, min(1.0, raw_distance))  # Clamp to [0, 1] range
+        
         enriched_result = {
             "cbir_id": result.get("id"),
-            "distance": result.get("distance"),
-            "similarity_score": max(0.0, 1.0 - result.get("distance", 0)),  # Convert distance to similarity
+            "distance": raw_distance,
+            "similarity_score": similarity,
             "cbir_labels": result.get("labels", []),
             "image_path": path,
         }

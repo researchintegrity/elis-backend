@@ -37,6 +37,7 @@ from app.services.panel_extraction_service import (
     get_panels_by_source_image
 )
 from app.tasks.copy_move_detection import detect_copy_move
+from app.tasks.cbir import cbir_index_image
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -198,6 +199,19 @@ async def upload_image(
         
         # Update user storage in database for easy access
         update_user_storage_in_db(user_id_str)
+        
+        # Trigger CBIR indexing asynchronously
+        try:
+            cbir_index_image.delay(
+                user_id=user_id_str,
+                image_id=str(image_id),
+                image_path=str(storage_path),
+                labels=img_record.get("image_type", [])
+            )
+        except Exception as e:
+            # Log but don't fail the upload if CBIR indexing fails to queue
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to queue CBIR indexing for image {image_id}: {e}")
         
         return ImageResponse(**img_record)
     

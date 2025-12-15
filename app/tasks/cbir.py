@@ -334,10 +334,15 @@ def _enrich_search_results(user_id: str, results: list) -> list:
         path = result["image_path"]
         image = path_to_image.get(path)
         
+        # Note: For Inner Product (IP) metric, distance IS the similarity score (higher = more similar)
+        # Our CBIR uses IP metric with normalized embeddings, so distance is cosine similarity
+        raw_distance = result.get("distance", 0)
+        similarity = max(0.0, min(1.0, raw_distance))  # Clamp to [0, 1] range
+        
         enriched_result = {
             "cbir_id": result.get("id"),
-            "distance": result.get("distance"),
-            "similarity_score": round(1.0 - result.get("distance", 0), 4),
+            "distance": raw_distance,
+            "similarity_score": round(similarity, 4),
             "cbir_labels": result.get("labels", []),
             "image_path": path,
         }

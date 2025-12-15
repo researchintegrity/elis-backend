@@ -13,6 +13,10 @@ from app.utils.file_storage import (
     delete_file,
     update_user_storage_in_db
 )
+from app.tasks.cbir import cbir_delete_image
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 async def delete_image_and_artifacts(
@@ -55,6 +59,19 @@ async def delete_image_and_artifacts(
     # Check if extracted - cannot delete extracted images directly
     if img.get("source_type") == "extracted":
         raise ValueError("Cannot delete extracted images directly. Delete the document instead.")
+    
+    # Delete from CBIR index if it was indexed
+    if img.get("cbir_indexed"):
+        try:
+            cbir_delete_image.delay(
+                user_id=user_id,
+                image_id=image_id,
+                image_path=img["file_path"]
+            )
+            logger.info(f"Queued CBIR deletion for image {image_id}")
+        except Exception as e:
+            logger.warning(f"Failed to queue CBIR deletion for image {image_id}: {e}")
+            # Continue with deletion even if CBIR deletion fails to queue
     
     # Delete image file from disk
     success, error = delete_file(img["file_path"])
