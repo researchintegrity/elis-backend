@@ -104,6 +104,10 @@ async def list_images(
     user_id: str,
     source_type: Optional[str] = None,
     document_id: Optional[str] = None,
+    image_type: Optional[List[str]] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    search: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     sort_by: str = "uploaded_date",
@@ -119,6 +123,10 @@ async def list_images(
         user_id: User ID (as string) who owns the images
         source_type: Optional filter - "extracted" or "uploaded"
         document_id: Optional filter by document ID
+        image_type: Optional list of image types/tags to filter by (matches any)
+        date_from: Optional ISO date string to filter images uploaded on or after
+        date_to: Optional ISO date string to filter images uploaded on or before
+        search: Optional search string for filename (case-insensitive)
         limit: Maximum number of images to return
         offset: Number of images to skip
         sort_by: Field to sort by (default: "uploaded_date")
@@ -133,6 +141,8 @@ async def list_images(
     Raises:
         ValueError: If source_type is invalid
     """
+    from datetime import datetime
+    
     images_col = get_images_collection()
     
     # Validate source_type if provided
@@ -147,6 +157,34 @@ async def list_images(
     
     if document_id:
         query["document_id"] = document_id
+    
+    # Image type filter - match any of the provided types
+    if image_type:
+        query["image_type"] = {"$in": image_type}
+    
+    # Date range filter
+    if date_from or date_to:
+        date_query = {}
+        if date_from:
+            try:
+                parsed_from = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                date_query["$gte"] = parsed_from
+            except ValueError:
+                pass  # Invalid date format, skip this filter
+        if date_to:
+            try:
+                parsed_to = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                # Set to end of day
+                parsed_to = parsed_to.replace(hour=23, minute=59, second=59, microsecond=999999)
+                date_query["$lte"] = parsed_to
+            except ValueError:
+                pass  # Invalid date format, skip this filter
+        if date_query:
+            query["uploaded_date"] = date_query
+    
+    # Search filter - case-insensitive regex on filename
+    if search:
+        query["filename"] = {"$regex": search, "$options": "i"}
     
     # Get total count before pagination
     total_count = images_col.count_documents(query)

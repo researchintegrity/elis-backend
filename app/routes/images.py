@@ -231,13 +231,17 @@ async def list_images(
     current_user: dict = Depends(get_current_user),
     source_type: str = Query(None, description="Filter by 'extracted' or 'uploaded'"),
     document_id: str = Query(None, description="Filter by document ID"),
+    image_type: str = Query(None, description="Comma-separated list of image types/tags to filter"),
+    date_from: str = Query(None, description="Filter images from this date (ISO format YYYY-MM-DD)"),
+    date_to: str = Query(None, description="Filter images until this date (ISO format YYYY-MM-DD)"),
+    search: str = Query(None, description="Search in filename (case-insensitive)"),
     page: Optional[int] = Query(None, ge=1, description="Page number (1-indexed). If provided, returns paginated response."),
     per_page: int = Query(24, ge=1, le=100, description="Number of items per page (1-100, default 24)"),
     limit: int = Query(50, description="DEPRECATED: Use per_page instead. Maximum number of images to return"),
     offset: int = Query(0, description="DEPRECATED: Use page instead. Number of images to skip")
 ):
     """
-    List all images uploaded by current user with optional pagination.
+    List all images uploaded by current user with optional pagination and filtering.
     
     Supports two modes:
     - **Paginated mode** (recommended): Use `page` and `per_page` params. Returns PaginatedImageResponse 
@@ -248,6 +252,10 @@ async def list_images(
         current_user: Current authenticated user
         source_type: Optional filter - 'extracted', 'uploaded', or 'panel'
         document_id: Optional filter by document ID
+        image_type: Optional comma-separated list of image types/tags to filter
+        date_from: Optional ISO date string for start of date range
+        date_to: Optional ISO date string for end of date range
+        search: Optional search string for filename
         page: Page number (1-indexed). Enables paginated response mode.
         per_page: Number of items per page (default: 24, max: 100)
         limit: DEPRECATED - Maximum number of images to return
@@ -272,11 +280,18 @@ async def list_images(
             actual_offset = offset
             actual_limit = limit
         
-        # Use service to get images
+        # Parse image_type from comma-separated string
+        parsed_image_type = [t.strip() for t in image_type.split(",")] if image_type else None
+        
+        # Use service to get images with all filter parameters
         result = await list_images_service(
             user_id=user_id_str,
             source_type=source_type,
             document_id=document_id,
+            image_type=parsed_image_type,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
             limit=actual_limit,
             offset=actual_offset
         )
