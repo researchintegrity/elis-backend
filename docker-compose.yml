@@ -303,6 +303,12 @@ services:
       context: system_modules/copy-move-detection
     profiles: ["tools"]
 
+  copy-move-detection-keypoint:
+    image: copy-move-detection-keypoint:latest
+    build:
+      context: system_modules/copy-move-detection-keypoint
+    profiles: ["tools"]
+
   trufor:
     image: trufor:latest
     build:

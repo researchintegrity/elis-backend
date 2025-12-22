@@ -1,5 +1,9 @@
 """
-Copy-Move Detection tasks for async processing
+Copy-Move Detection tasks for async processing.
+
+Supports two detection methods:
+- 'keypoint': Advanced keypoint-based detection (recommended for cross-image)
+- 'dense': Block-based dense matching
 """
 from celery import current_task
 from app.celery_config import celery_app
@@ -14,6 +18,11 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Method constants for clear documentation
+METHOD_KEYPOINT = "keypoint"
+METHOD_DENSE = "dense"
+
+
 @celery_app.task(bind=True, max_retries=CELERY_MAX_RETRIES, name="tasks.detect_copy_move")
 def detect_copy_move(
     self,
@@ -21,7 +30,8 @@ def detect_copy_move(
     image_id: str,
     user_id: str,
     image_path: str,
-    method: int = 2
+    method: str = METHOD_KEYPOINT,
+    dense_method: int = 2
 ):
     """
     Run copy-move detection on an image asynchronously.
@@ -31,7 +41,8 @@ def detect_copy_move(
         image_id: MongoDB ID of the image
         user_id: User ID
         image_path: Path to the image file
-        method: Detection method (1-5)
+        method: Detection method ('keypoint' or 'dense')
+        dense_method: Dense method variant (1-5), only used when method='dense'
     """
     analyses_col = get_analyses_collection()
     
@@ -47,7 +58,8 @@ def detect_copy_move(
             }
         )
         
-        logger.info(f"Starting copy-move detection for analysis {analysis_id} (image {image_id}) with method {method}")
+        method_desc = f"{method}" + (f" (variant {dense_method})" if method == METHOD_DENSE else "")
+        logger.info(f"Starting copy-move detection for analysis {analysis_id} (image {image_id}) with method {method_desc}")
         
         # Run detection
         success, message, results = run_copy_move_detection_with_docker(
@@ -55,22 +67,29 @@ def detect_copy_move(
             analysis_type=AnalysisType.SINGLE_IMAGE_COPY_MOVE,
             user_id=user_id,
             image_path=image_path,
-            method=method
+            method=method,
+            dense_method=dense_method
         )
         
         if success:
+            # Build result metadata
+            result_data = {
+                "method": method,
+                "timestamp": datetime.utcnow(),
+                "matches_image": results.get('matches_image'),
+                "clusters_image": results.get('clusters_image')
+            }
+            # Include dense_method in results if applicable
+            if method == METHOD_DENSE:
+                result_data["dense_method"] = dense_method
+            
             # Update with results
             analyses_col.update_one(
                 {"_id": ObjectId(analysis_id)},
                 {
                     "$set": {
                         "status": AnalysisStatus.COMPLETED,
-                        "results": {
-                            "method": method,
-                            "timestamp": datetime.utcnow(),
-                            "matches_image": results.get('matches_image'),
-                            "clusters_image": results.get('clusters_image')
-                        },
+                        "results": result_data,
                         "updated_at": datetime.utcnow()
                     }
                 }
@@ -120,7 +139,8 @@ def detect_copy_move_cross(
     user_id: str,
     source_image_path: str,
     target_image_path: str,
-    method: int = 2
+    method: str = METHOD_KEYPOINT,
+    dense_method: int = 2
 ):
     """
     Run cross-image copy-move detection asynchronously.
@@ -132,7 +152,8 @@ def detect_copy_move_cross(
         user_id: User ID
         source_image_path: Path to the source image file
         target_image_path: Path to the target image file
-        method: Detection method (1-5)
+        method: Detection method ('keypoint' or 'dense')
+        dense_method: Dense method variant (1-5), only used when method='dense'
     """
     analyses_col = get_analyses_collection()
     
@@ -148,7 +169,11 @@ def detect_copy_move_cross(
             }
         )
         
-        logger.info(f"Starting cross-image copy-move detection for analysis {analysis_id} (source: {source_image_id}, target: {target_image_id}) with method {method}")
+        method_desc = f"{method}" + (f" (variant {dense_method})" if method == METHOD_DENSE else "")
+        logger.info(
+            f"Starting cross-image copy-move detection for analysis {analysis_id} "
+            f"(source: {source_image_id}, target: {target_image_id}) with method {method_desc}"
+        )
         
         # Run detection
         success, message, results = run_copy_move_detection_with_docker(
@@ -157,22 +182,29 @@ def detect_copy_move_cross(
             user_id=user_id,
             image_path=source_image_path,
             target_image_path=target_image_path,
-            method=method
+            method=method,
+            dense_method=dense_method
         )
         
         if success:
+            # Build result metadata
+            result_data = {
+                "method": method,
+                "timestamp": datetime.utcnow(),
+                "matches_image": results.get('matches_image'),
+                "clusters_image": results.get('clusters_image')
+            }
+            # Include dense_method in results if applicable
+            if method == METHOD_DENSE:
+                result_data["dense_method"] = dense_method
+            
             # Update with results
             analyses_col.update_one(
                 {"_id": ObjectId(analysis_id)},
                 {
                     "$set": {
                         "status": AnalysisStatus.COMPLETED,
-                        "results": {
-                            "method": method,
-                            "timestamp": datetime.utcnow(),
-                            "matches_image": results.get('matches_image'),
-                            "clusters_image": results.get('clusters_image')
-                        },
+                        "results": result_data,
                         "updated_at": datetime.utcnow()
                     }
                 }

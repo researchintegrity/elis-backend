@@ -779,6 +779,12 @@ class CBIRStatusResponse(BaseModel):
 # ANALYSIS SCHEMAS
 # ============================================================================
 
+class CopyMoveMethod(str, Enum):
+    """Detection method for copy-move analysis"""
+    DENSE = "dense"  # Dense matching (original copy-move-detection module, methods 1-5)
+    KEYPOINT = "keypoint"  # Keypoint matching (copy-move-detection-keypoint module)
+
+
 class AnalysisType(str, Enum):
     SINGLE_IMAGE_COPY_MOVE = "single_image_copy_move"
     CROSS_IMAGE_COPY_MOVE = "cross_image_copy_move"
@@ -807,19 +813,31 @@ class AnalysisBase(BaseModel):
 class SingleImageAnalysisCreate(BaseModel):
     """Request to create a single image analysis"""
     image_id: str
-    method: int = Field(2, ge=1, le=5, description="Detection method (1-5)")
+    method: CopyMoveMethod = Field(
+        CopyMoveMethod.KEYPOINT,
+        description="Detection method: 'keypoint' (advanced keypoint-based) or 'dense' (block-based)"
+    )
+    # Dense method sub-parameter (only used when method='dense')
+    dense_method: int = Field(2, ge=1, le=5, description="Dense method variant (1-5), only used when method='dense'")
 
 
 class CrossImageAnalysisCreate(BaseModel):
     """Request to create a cross image analysis"""
     source_image_id: str
     target_image_id: str
-    method: int = Field(2, ge=1, le=5, description="Detection method (1-5)")
+    method: CopyMoveMethod = Field(
+        CopyMoveMethod.KEYPOINT,
+        description="Detection method: 'keypoint' (advanced keypoint-based) or 'dense' (block-based)"
+    )
+    # Dense method sub-parameter (only used when method='dense')
+    dense_method: int = Field(2, ge=1, le=5, description="Dense method variant (1-5), only used when method='dense'")
 
 
 class AnalysisResult(BaseModel):
     """Generic analysis result container"""
-    method: Optional[int] = None
+    # Method can be string ('keypoint', 'dense') for copy-move or int for legacy
+    method: Optional[Any] = None
+    dense_method: Optional[int] = None  # Sub-method for dense detection (1-5)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     matches_image: Optional[str] = None
     clusters_image: Optional[str] = None

@@ -124,6 +124,10 @@ async def analyze_copy_move_single(
 ):
     """
     Start single-image copy-move detection analysis.
+    
+    Supports two detection methods:
+    - 'keypoint': Advanced keypoint-based detection (recommended)
+    - 'dense': Block-based dense matching
     """
     user_id_str = str(current_user["_id"])
     
@@ -144,7 +148,8 @@ async def analyze_copy_move_single(
         "status": AnalysisStatus.PENDING,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
-        "method": request.method
+        "method": request.method.value,  # Store as string value
+        "dense_method": request.dense_method if request.method.value == "dense" else None
     }
     result = analyses_col.insert_one(analysis_doc)
     analysis_id = str(result.inserted_id)
@@ -162,7 +167,8 @@ async def analyze_copy_move_single(
         image_id=request.image_id,
         user_id=user_id_str,
         image_path=image["file_path"],
-        method=request.method
+        method=request.method.value,
+        dense_method=request.dense_method
     )
     
     return {
@@ -178,6 +184,12 @@ async def analyze_copy_move_cross(
 ):
     """
     Start cross-image copy-move detection analysis.
+    
+    Detects if content from source image was copied to target image.
+    
+    Supports two detection methods:
+    - 'keypoint': Advanced keypoint-based detection (recommended for cross-image)
+    - 'dense': Block-based dense matching
     """
     user_id_str = str(current_user["_id"])
     
@@ -206,7 +218,8 @@ async def analyze_copy_move_cross(
         "status": AnalysisStatus.PENDING,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
-        "method": request.method
+        "method": request.method.value,  # Store as string value
+        "dense_method": request.dense_method if request.method.value == "dense" else None
     }
     result = analyses_col.insert_one(analysis_doc)
     analysis_id = str(result.inserted_id)
@@ -218,12 +231,6 @@ async def analyze_copy_move_cross(
         {"$addToSet": {"analysis_ids": analysis_id}}
     )
     
-    # Trigger task (reusing the same task, it handles both types now via run_copy_move_detection_with_docker)
-    # Wait, I need to update the task signature to accept target_image_path or create a new task.
-    # The current task `detect_copy_move` accepts `image_path`.
-    # I should probably update `detect_copy_move` to be generic or create a wrapper.
-    # Let's create a new task `detect_copy_move_cross` for clarity and to match the Todo list.
-    
     from app.tasks.copy_move_detection import detect_copy_move_cross
     
     detect_copy_move_cross.delay(
@@ -233,7 +240,8 @@ async def analyze_copy_move_cross(
         user_id=user_id_str,
         source_image_path=source_image["file_path"],
         target_image_path=target_image["file_path"],
-        method=request.method
+        method=request.method.value,
+        dense_method=request.dense_method
     )
     
     return {

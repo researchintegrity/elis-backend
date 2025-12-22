@@ -69,10 +69,14 @@ PANEL_EXTRACTION_DOCKER_WORKDIR = CONTAINER_WORKSPACE_PATH
 PANEL_EXTRACTION_TIMEOUT = 600  # 10 minutes (panel extraction can take longer)
 MAX_IMAGES_PER_EXTRACTION = 20  # Maximum number of images to process in one batch
 
-# Docker image for Copy-Move Detection (system_modules/copy-move-detection)
+# Docker image for Copy-Move Detection - Dense method (system_modules/copy-move-detection)
 COPY_MOVE_DETECTION_DOCKER_IMAGE = "copy-move-detection:latest"
 COPY_MOVE_DETECTION_TIMEOUT = 600  # 10 minutes
 COPY_MOVE_DETECTION_DOCKER_WORKDIR = CONTAINER_WORKSPACE_PATH
+
+# Docker image for Copy-Move Detection - Keypoint method (system_modules/copy-move-detection-keypoint)
+COPY_MOVE_KEYPOINT_DOCKER_IMAGE = "copy-move-detection-keypoint:latest"
+COPY_MOVE_KEYPOINT_TIMEOUT = 600  # 10 minutes
 
 # Docker image for TruFor Detection (system_modules/TruFor)
 TRUFOR_DOCKER_IMAGE = "trufor:latest"
