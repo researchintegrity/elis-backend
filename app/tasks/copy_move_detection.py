@@ -140,7 +140,8 @@ def detect_copy_move_cross(
     source_image_path: str,
     target_image_path: str,
     method: str = METHOD_KEYPOINT,
-    dense_method: int = 2
+    dense_method: int = 2,
+    descriptor: str = "cv_rsift"
 ):
     """
     Run cross-image copy-move detection asynchronously.
@@ -154,6 +155,7 @@ def detect_copy_move_cross(
         target_image_path: Path to the target image file
         method: Detection method ('keypoint' or 'dense')
         dense_method: Dense method variant (1-5), only used when method='dense'
+        descriptor: Keypoint descriptor type, only used when method='keypoint'
     """
     analyses_col = get_analyses_collection()
     
@@ -169,7 +171,10 @@ def detect_copy_move_cross(
             }
         )
         
-        method_desc = f"{method}" + (f" (variant {dense_method})" if method == METHOD_DENSE else "")
+        if method == METHOD_KEYPOINT:
+            method_desc = f"{method} (descriptor: {descriptor})"
+        else:
+            method_desc = f"{method} (variant {dense_method})"
         logger.info(
             f"Starting cross-image copy-move detection for analysis {analysis_id} "
             f"(source: {source_image_id}, target: {target_image_id}) with method {method_desc}"
@@ -183,7 +188,8 @@ def detect_copy_move_cross(
             image_path=source_image_path,
             target_image_path=target_image_path,
             method=method,
-            dense_method=dense_method
+            dense_method=dense_method,
+            descriptor=descriptor
         )
         
         if success:
@@ -194,9 +200,11 @@ def detect_copy_move_cross(
                 "matches_image": results.get('matches_image'),
                 "clusters_image": results.get('clusters_image')
             }
-            # Include dense_method in results if applicable
+            # Include method-specific parameters in results
             if method == METHOD_DENSE:
                 result_data["dense_method"] = dense_method
+            else:
+                result_data["descriptor"] = descriptor
             
             # Update with results
             analyses_col.update_one(

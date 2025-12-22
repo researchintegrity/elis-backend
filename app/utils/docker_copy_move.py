@@ -145,9 +145,17 @@ def _build_dense_docker_command(
 def _build_keypoint_docker_command(
     paths: Dict,
     docker_image: str,
-    timeout: int
+    timeout: int,
+    descriptor: str = "cv_rsift"
 ) -> list:
-    """Build Docker command for keypoint method detection."""
+    """Build Docker command for keypoint method detection.
+    
+    Args:
+        paths: Path dictionary from _setup_paths
+        docker_image: Docker image name
+        timeout: Detection timeout in seconds
+        descriptor: Keypoint descriptor type (cv_sift, cv_rsift, vlfeat_sift_heq)
+    """
     container_input_path = f"/input_vol/{paths['image_filename']}"
     container_output_path = "/output_vol"
     
@@ -170,6 +178,7 @@ def _build_keypoint_docker_command(
     
     cmd.extend([
         "--output", container_output_path,
+        "--descriptor", descriptor,
         "--timeout", str(timeout)
     ])
     
@@ -239,13 +248,15 @@ def run_copy_move_detection_with_docker(
     target_image_path: str = None,
     method: str = METHOD_KEYPOINT,
     dense_method: int = 2,
+    descriptor: str = "cv_rsift",
     docker_image: str = None
 ) -> Tuple[bool, str, Dict]:
     """Run copy-move detection on an image using Docker.
 
     Supports two detection methods:
     - 'keypoint': Advanced keypoint-based detection (recommended for cross-image)
-    - 'dense': Block-based dense matching (original method)
+      - Supports descriptor types: cv_sift, cv_rsift (default), vlfeat_sift_heq
+    - 'dense': Block-based dense matching (original method, variants 1-5)
 
     Args:
         analysis_id: ID of the analysis
@@ -255,6 +266,7 @@ def run_copy_move_detection_with_docker(
         target_image_path: Absolute path to the target image file (for cross-image)
         method: Detection method ('keypoint' or 'dense')
         dense_method: Sub-method for dense detection (1-5), only used when method='dense'
+        descriptor: Keypoint descriptor type, only used when method='keypoint'
         docker_image: Optional custom docker image name (overrides method selection)
 
     Returns:
@@ -282,7 +294,7 @@ def run_copy_move_detection_with_docker(
     
     # Build Docker command based on method
     if method == METHOD_KEYPOINT and docker_image is None:
-        cmd = _build_keypoint_docker_command(paths, selected_image, timeout)
+        cmd = _build_keypoint_docker_command(paths, selected_image, timeout, descriptor)
     else:
         cmd = _build_dense_docker_command(paths, selected_image, dense_method, timeout)
     

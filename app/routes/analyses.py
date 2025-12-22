@@ -189,7 +189,8 @@ async def analyze_copy_move_cross(
     
     Supports two detection methods:
     - 'keypoint': Advanced keypoint-based detection (recommended for cross-image)
-    - 'dense': Block-based dense matching
+      - Supports descriptor types: cv_sift, cv_rsift (default), vlfeat_sift_heq
+    - 'dense': Block-based dense matching (methods 1-5)
     """
     user_id_str = str(current_user["_id"])
     
@@ -219,7 +220,8 @@ async def analyze_copy_move_cross(
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
         "method": request.method.value,  # Store as string value
-        "dense_method": request.dense_method if request.method.value == "dense" else None
+        "dense_method": request.dense_method if request.method.value == "dense" else None,
+        "descriptor": request.descriptor.value if request.method.value == "keypoint" else None
     }
     result = analyses_col.insert_one(analysis_doc)
     analysis_id = str(result.inserted_id)
@@ -241,7 +243,8 @@ async def analyze_copy_move_cross(
         source_image_path=source_image["file_path"],
         target_image_path=target_image["file_path"],
         method=request.method.value,
-        dense_method=request.dense_method
+        dense_method=request.dense_method,
+        descriptor=request.descriptor.value
     )
     
     return {

@@ -782,7 +782,14 @@ class CBIRStatusResponse(BaseModel):
 class CopyMoveMethod(str, Enum):
     """Detection method for copy-move analysis"""
     DENSE = "dense"  # Dense matching (original copy-move-detection module, methods 1-5)
-    KEYPOINT = "keypoint"  # Keypoint matching (copy-move-detection-keypoint module)
+    KEYPOINT = "keypoint"  # Keypoint matching (copy-move-detection-keypoint module, cross-image only)
+
+
+class KeypointDescriptor(str, Enum):
+    """Descriptor types for keypoint-based copy-move detection"""
+    CV_SIFT = "cv_sift"  # OpenCV SIFT
+    CV_RSIFT = "cv_rsift"  # OpenCV RootSIFT (default, recommended)
+    VLFEAT_SIFT_HEQ = "vlfeat_sift_heq"  # VLFeat SIFT with histogram equalization
 
 
 class AnalysisType(str, Enum):
@@ -811,14 +818,15 @@ class AnalysisBase(BaseModel):
 
 
 class SingleImageAnalysisCreate(BaseModel):
-    """Request to create a single image analysis"""
+    """Request to create a single image analysis (dense method only)"""
     image_id: str
+    # Single-image detection only supports dense method
     method: CopyMoveMethod = Field(
-        CopyMoveMethod.KEYPOINT,
-        description="Detection method: 'keypoint' (advanced keypoint-based) or 'dense' (block-based)"
+        CopyMoveMethod.DENSE,
+        description="Detection method for single image (only 'dense' supported)"
     )
-    # Dense method sub-parameter (only used when method='dense')
-    dense_method: int = Field(2, ge=1, le=5, description="Dense method variant (1-5), only used when method='dense'")
+    # Dense method sub-parameter (1-5)
+    dense_method: int = Field(2, ge=1, le=5, description="Dense method variant (1-5)")
 
 
 class CrossImageAnalysisCreate(BaseModel):
@@ -827,10 +835,15 @@ class CrossImageAnalysisCreate(BaseModel):
     target_image_id: str
     method: CopyMoveMethod = Field(
         CopyMoveMethod.KEYPOINT,
-        description="Detection method: 'keypoint' (advanced keypoint-based) or 'dense' (block-based)"
+        description="Detection method: 'keypoint' (recommended) or 'dense'"
     )
     # Dense method sub-parameter (only used when method='dense')
     dense_method: int = Field(2, ge=1, le=5, description="Dense method variant (1-5), only used when method='dense'")
+    # Keypoint descriptor (only used when method='keypoint')
+    descriptor: KeypointDescriptor = Field(
+        KeypointDescriptor.CV_RSIFT,
+        description="Keypoint descriptor type, only used when method='keypoint'"
+    )
 
 
 class AnalysisResult(BaseModel):
@@ -838,6 +851,7 @@ class AnalysisResult(BaseModel):
     # Method can be string ('keypoint', 'dense') for copy-move or int for legacy
     method: Optional[Any] = None
     dense_method: Optional[int] = None  # Sub-method for dense detection (1-5)
+    descriptor: Optional[str] = None  # Keypoint descriptor type (cv_sift, cv_rsift, vlfeat_sift_heq)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     matches_image: Optional[str] = None
     clusters_image: Optional[str] = None
