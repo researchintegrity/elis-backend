@@ -472,12 +472,19 @@ class PaginatedResponse(BaseModel):
 # Annotation Schemas
 # ============================================================================
 
-class CoordinateInfo(BaseModel):
-    """Annotation coordinates"""
+class PolygonPoint(BaseModel):
+    """A single point in a polygon"""
     x: float = Field(..., description="X coordinate (percentage)")
     y: float = Field(..., description="Y coordinate (percentage)")
-    width: float = Field(..., description="Width (percentage)")
-    height: float = Field(..., description="Height (percentage)")
+
+
+class CoordinateInfo(BaseModel):
+    """Annotation coordinates - supports rectangles, ellipses, and polygons"""
+    x: float = Field(0, description="X coordinate (percentage)")
+    y: float = Field(0, description="Y coordinate (percentage)")
+    width: float = Field(0, description="Width (percentage)")
+    height: float = Field(0, description="Height (percentage)")
+    points: Optional[List[PolygonPoint]] = Field(None, description="Polygon points (for polygon shapes)")
 
     class Config:
         schema_extra = {
@@ -493,20 +500,26 @@ class CoordinateInfo(BaseModel):
 class AnnotationCreate(BaseModel):
     """Annotation creation request"""
     image_id: str = Field(..., description="ID of the image being annotated")
-    text: str = Field(..., min_length=1, max_length=1000, description="Annotation text")
+    text: str = Field("", max_length=1000, description="Annotation text/description")
     coords: CoordinateInfo = Field(..., description="Annotation coordinates")
+    type: Optional[str] = Field("manipulation", description="Annotation type/label (e.g., manipulation, copy-move, splicing)")
+    group_id: Optional[int] = Field(None, description="Group ID for related annotations (e.g., copy-move pairs)")
+    shape_type: Optional[str] = Field("rectangle", description="Shape type: rectangle, ellipse, or polygon")
 
     class Config:
         schema_extra = {
             "example": {
                 "image_id": "507f1f77bcf86cd799439013",
-                "text": "Núcleo celular identificado",
+                "text": "Detected manipulation region",
                 "coords": {
                     "x": 25.5,
                     "y": 30.1,
                     "width": 10.2,
                     "height": 15.8
-                }
+                },
+                "type": "manipulation",
+                "group_id": None,
+                "shape_type": "rectangle"
             }
         }
 
@@ -518,6 +531,9 @@ class AnnotationResponse(BaseModel):
     image_id: str
     text: str
     coords: CoordinateInfo
+    type: Optional[str] = "manipulation"
+    group_id: Optional[int] = None
+    shape_type: Optional[str] = "rectangle"
     created_at: datetime
     updated_at: datetime
 
