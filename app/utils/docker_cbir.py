@@ -441,3 +441,54 @@ def check_images_indexed(
     except requests.RequestException as e:
         logger.error(f"CBIR service request failed: {e}")
         return False, f"CBIR service error: {str(e)}", {}
+
+
+def update_image_labels(
+    user_id: str,
+    image_path: str,
+    labels: List[str]
+) -> Tuple[bool, str]:
+    """
+    Update labels for an indexed image in the CBIR system.
+    
+    This updates the classification labels without re-encoding the image.
+    
+    Args:
+        user_id: User ID for multi-tenancy isolation
+        image_path: Path to the image to update
+        labels: New labels to set (replaces existing labels)
+        
+    Returns:
+        Tuple (success, message)
+    """
+    cbir_path = str(convert_host_path_to_container(image_path))
+    
+    payload = {
+        "user_id": user_id,
+        "image_path": cbir_path,
+        "labels": labels
+    }
+    
+    logger.info(f"Updating CBIR labels for image: {cbir_path} -> {labels}")
+    
+    try:
+        response = requests.post(
+            f"{CBIR_SERVICE_URL}/update/labels",
+            json=payload,
+            timeout=CBIR_TIMEOUT
+        )
+        
+        if response.status_code == 200:
+            return True, "Labels updated successfully"
+        elif response.status_code == 404:
+            # Image not in CBIR index - not an error, just not indexed yet
+            logger.info(f"Image not in CBIR index (skipping label update): {cbir_path}")
+            return True, "Image not in CBIR index (skipped)"
+        else:
+            error_detail = response.json().get("detail", response.text)
+            logger.error(f"CBIR label update failed: {error_detail}")
+            return False, f"Label update failed: {error_detail}"
+            
+    except requests.RequestException as e:
+        logger.error(f"CBIR service request failed: {e}")
+        return False, f"CBIR service error: {str(e)}"

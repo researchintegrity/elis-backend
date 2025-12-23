@@ -213,6 +213,25 @@ GET /analyses/{analysis_id}
 ```
 Returns status and results for any analysis type (CBIR, Copy-Move, TruFor, Provenance).
 
+### Copy-Move Detection (Single Image)
+```
+POST /analyses/copy-move/single
+Content-Type: application/json
+
+{
+  "image_id": "id1",
+  "method": "keypoint",
+  "dense_method": 2
+}
+```
+Detects copied-and-pasted regions within a single image.
+
+**Parameters:**
+- `method`: Detection algorithm type
+  - `keypoint` (default): Advanced keypoint-based detection using SIFT/RootSIFT with geometric verification
+  - `dense`: Block-based dense matching
+- `dense_method`: Sub-variant for dense method (1-5), only used when `method="dense"`
+
 ### Copy-Move Detection (Cross-Image)
 ```
 POST /analyses/copy-move/cross
@@ -221,11 +240,17 @@ Content-Type: application/json
 {
   "source_image_id": "id1",
   "target_image_id": "id2",
-  "method": "keypoint" 
+  "method": "keypoint",
+  "dense_method": 2
 }
 ```
 Detects if content from source image was copied to target image.
-`method` can be `keypoint` (default) or `dense`.
+
+**Parameters:**
+- `method`: Detection algorithm type
+  - `keypoint` (default, recommended for cross-image): Advanced keypoint-based detection
+  - `dense`: Block-based dense matching
+- `dense_method`: Sub-variant for dense method (1-5), only used when `method="dense"`
 
 ### TruFor Forgery Detection
 ```

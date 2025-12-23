@@ -298,7 +298,11 @@ async def list_images(
     sort_by: str = Query("uploaded_date", description="Sort field"),
     order: str = Query("desc", description="Sort order: asc or desc"),
     source_type: Optional[str] = Query(None, description="Filter by source type: uploaded, extracted"),
-    document_id: Optional[str] = Query(None, description="Filter by document ID")
+    document_id: Optional[str] = Query(None, description="Filter by document ID"),
+    image_type: Optional[str] = Query(None, description="Comma-separated list of image types/tags to filter"),
+    date_from: Optional[str] = Query(None, description="Filter images from this date (ISO format YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Filter images until this date (ISO format YYYY-MM-DD)"),
+    search: Optional[str] = Query(None, description="Search in filename (case-insensitive)")
 ):
     """
     List images with pagination and filtering
@@ -311,6 +315,10 @@ async def list_images(
         order: Sort order (asc/desc)
         source_type: Optional filter by source type
         document_id: Optional filter by document ID
+        image_type: Optional comma-separated list of image types/tags
+        date_from: Optional ISO date string for start of date range
+        date_to: Optional ISO date string for end of date range
+        search: Optional search string for filename
         
     Returns:
         Paginated list of images
@@ -321,11 +329,18 @@ async def list_images(
         # Build sort order
         sort_order = -1 if order.lower() == "desc" else 1
         
+        # Parse image_type from comma-separated string
+        parsed_image_type = [t.strip() for t in image_type.split(",")] if image_type else None
+        
         # Use service to get images (get all to calculate pagination)
         result = await list_images_service(
             user_id=user_id,
             source_type=source_type,
             document_id=document_id,
+            image_type=parsed_image_type,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
             limit=per_page,
             offset=(page - 1) * per_page,
             sort_by=sort_by,

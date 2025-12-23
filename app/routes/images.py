@@ -3,14 +3,16 @@ Image upload routes for extracted and user-uploaded image management
 """
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Query
 from fastapi.responses import FileResponse
-from typing import List
+from typing import List, Union, Optional
 from bson import ObjectId
 from datetime import datetime
 from pathlib import Path
+import math
 
 from app.schemas import (
     ImageResponse,
     ImageTypesUpdateRequest,
+    PaginatedImageResponse,
 )
 from app.db.mongodb import get_images_collection, get_documents_collection
 from app.utils.security import get_current_user
@@ -37,6 +39,7 @@ from app.services.panel_extraction_service import (
     get_panels_by_source_image
 )
 from app.tasks.copy_move_detection import detect_copy_move
+from app.tasks.cbir import cbir_index_image, cbir_update_labels
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -199,6 +202,19 @@ async def upload_image(
         # Update user storage in database for easy access
         update_user_storage_in_db(user_id_str)
         
+        # Trigger CBIR indexing asynchronously
+        try:
+            cbir_index_image.delay(
+                user_id=user_id_str,
+                image_id=str(image_id),
+                image_path=str(storage_path),
+                labels=img_record.get("image_type", [])
+            )
+        except Exception as e:
+            # Log but don't fail the upload if CBIR indexing fails to queue
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to queue CBIR indexing for image {image_id}: {e}")
+        
         return ImageResponse(**img_record)
     
     except HTTPException:
@@ -210,38 +226,74 @@ async def upload_image(
         )
 
 
-@router.get("", response_model=List[ImageResponse])
+@router.get("", response_model=Union[PaginatedImageResponse, List[ImageResponse]])
 async def list_images(
     current_user: dict = Depends(get_current_user),
     source_type: str = Query(None, description="Filter by 'extracted' or 'uploaded'"),
     document_id: str = Query(None, description="Filter by document ID"),
-    limit: int = 50,
-    offset: int = 0
+    image_type: str = Query(None, description="Comma-separated list of image types/tags to filter"),
+    date_from: str = Query(None, description="Filter images from this date (ISO format YYYY-MM-DD)"),
+    date_to: str = Query(None, description="Filter images until this date (ISO format YYYY-MM-DD)"),
+    search: str = Query(None, description="Search in filename (case-insensitive)"),
+    page: Optional[int] = Query(None, ge=1, description="Page number (1-indexed). If provided, returns paginated response."),
+    per_page: int = Query(24, ge=1, le=100, description="Number of items per page (1-100, default 24)"),
+    limit: int = Query(50, description="DEPRECATED: Use per_page instead. Maximum number of images to return"),
+    offset: int = Query(0, description="DEPRECATED: Use page instead. Number of images to skip")
 ):
     """
-    List all images uploaded by current user
+    List all images uploaded by current user with optional pagination and filtering.
+    
+    Supports two modes:
+    - **Paginated mode** (recommended): Use `page` and `per_page` params. Returns PaginatedImageResponse 
+      with metadata (total, total_pages, has_next, has_prev) for efficient gallery pagination.
+    - **Legacy mode**: Use `limit` and `offset` params. Returns plain list of ImageResponse.
     
     Args:
         current_user: Current authenticated user
-        source_type: Optional filter - 'extracted' or 'uploaded'
+        source_type: Optional filter - 'extracted', 'uploaded', or 'panel'
         document_id: Optional filter by document ID
-        limit: Maximum number of images to return
-        offset: Number of images to skip
+        image_type: Optional comma-separated list of image types/tags to filter
+        date_from: Optional ISO date string for start of date range
+        date_to: Optional ISO date string for end of date range
+        search: Optional search string for filename
+        page: Page number (1-indexed). Enables paginated response mode.
+        per_page: Number of items per page (default: 24, max: 100)
+        limit: DEPRECATED - Maximum number of images to return
+        offset: DEPRECATED - Number of images to skip
         
     Returns:
-        List of ImageResponse objects with storage quota info
+        PaginatedImageResponse (if page is provided) or List[ImageResponse] (legacy)
     """
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
     
     try:
-        # Use service to get images
+        # Determine pagination mode
+        use_pagination = page is not None
+        
+        if use_pagination:
+            # New pagination mode with page/per_page
+            actual_offset = (page - 1) * per_page
+            actual_limit = per_page
+        else:
+            # Legacy mode with limit/offset
+            actual_offset = offset
+            actual_limit = limit
+        
+        # Parse image_type from comma-separated string
+        parsed_image_type = [t.strip() for t in image_type.split(",")] if image_type else None
+        
+        # Use service to get images with all filter parameters
         result = await list_images_service(
             user_id=user_id_str,
             source_type=source_type,
             document_id=document_id,
-            limit=limit,
-            offset=offset
+            image_type=parsed_image_type,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            limit=actual_limit,
+            offset=actual_offset
         )
         
         # Map to response models with quota info
@@ -250,7 +302,23 @@ async def list_images(
             img = augment_with_quota(img, user_id_str, user_quota)
             responses.append(ImageResponse(**img))
         
-        return responses
+        if use_pagination:
+            # Return paginated response with metadata
+            total = result["total"]
+            total_pages = math.ceil(total / per_page) if total > 0 else 1
+            
+            return PaginatedImageResponse(
+                items=responses,
+                total=total,
+                page=page,
+                per_page=per_page,
+                total_pages=total_pages,
+                has_next=page < total_pages,
+                has_prev=page > 1
+            )
+        else:
+            # Legacy mode: return plain list
+            return responses
     
     except ValueError as e:
         raise HTTPException(
@@ -656,6 +724,15 @@ async def add_image_types(
             {"$set": {"image_type": merged_types}}
         )
         
+        # Update CBIR labels asynchronously (if image has file_path)
+        if image_doc.get("file_path"):
+            cbir_update_labels.delay(
+                user_id=user_id,
+                image_id=image_id,
+                image_path=image_doc["file_path"],
+                labels=merged_types
+            )
+        
         # Fetch updated document
         updated_doc = images_col.find_one({"_id": ObjectId(image_id)})
         
@@ -746,6 +823,15 @@ async def remove_image_type(
             {"_id": ObjectId(image_id)},
             {"$set": {"image_type": updated_types}}
         )
+        
+        # Update CBIR labels asynchronously (if image has file_path)
+        if image_doc.get("file_path"):
+            cbir_update_labels.delay(
+                user_id=user_id,
+                image_id=image_id,
+                image_path=image_doc["file_path"],
+                labels=updated_types
+            )
         
         # Fetch updated document
         updated_doc = images_col.find_one({"_id": ObjectId(image_id)})

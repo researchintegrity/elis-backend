@@ -60,6 +60,7 @@ def get_user_images_for_provenance(
 def run_provenance_analysis(
     user_id: str,
     query_image_id: str,
+    search_image_ids: Optional[List[str]] = None,
     k: int = 10,
     q: int = 5,
     max_depth: int = 3,
@@ -71,6 +72,7 @@ def run_provenance_analysis(
     Args:
         user_id: User ID
         query_image_id: ID of the query image
+        search_image_ids: Optional list of image IDs to include in analysis
         k: Top-K candidates
         q: Top-Q expansion
         max_depth: Expansion depth
@@ -95,14 +97,9 @@ def run_provenance_analysis(
         "label": query_img_doc.get("filename", "Query Image")
     }
     
-    # 2. Get all user images (the pool for analysis)
-    # In a real scenario, we might want to filter this, but for now we pass all user images
-    # The microservice will filter based on CBIR results anyway.
-    # However, passing thousands of images might be heavy on the request payload.
-    # Ideally, the microservice should be able to fetch from DB or we rely on CBIR to find candidates first.
-    # But the current microservice API expects a list of 'images' to consider.
-    # Let's pass all user images for now, assuming reasonable dataset size per user.
-    images = get_user_images_for_provenance(user_id)
+    # 2. Get images for analysis (filtered if search_image_ids provided)
+    # If search_image_ids is None or empty, all user images will be used
+    images = get_user_images_for_provenance(user_id, image_ids=search_image_ids)
     
     # 3. Call microservice
     return analyze_provenance(

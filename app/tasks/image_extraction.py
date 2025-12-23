@@ -7,6 +7,7 @@ from app.db.mongodb import get_documents_collection, get_images_collection
 from app.utils.file_storage import figure_extraction_hook
 from app.utils.metadata_parser import parse_pdf_extraction_filename, is_pdf_extraction_filename, extract_exif_metadata
 from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_host_path_to_container
+from app.tasks.cbir import cbir_index_batch
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -220,6 +221,25 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
             "errors": extraction_errors,
             "completed_at": datetime.utcnow().isoformat()
         }
+        
+        # Trigger CBIR indexing for all successfully extracted images
+        if extracted_files_with_ids and extraction_status in ["completed", "completed_with_errors"]:
+            try:
+                cbir_items = [
+                    {
+                        "image_id": img_file["mongodb_id"],
+                        "image_path": img_file["path"],
+                        "labels": []  # No labels for extracted images initially
+                    }
+                    for img_file in extracted_files_with_ids
+                    if img_file.get("mongodb_id")  # Only include images with valid MongoDB IDs
+                ]
+                if cbir_items:
+                    cbir_index_batch.delay(user_id=user_id, image_items=cbir_items)
+                    logger.info(f"Queued CBIR indexing for {len(cbir_items)} extracted images from doc_id={doc_id}")
+            except Exception as cbir_error:
+                logger.warning(f"Failed to queue CBIR indexing for doc_id={doc_id}: {cbir_error}")
+                # Don't fail extraction if CBIR indexing fails to queue
         
         # If extraction failed, raise an exception to make the Celery task state FAILURE
         if extraction_status in ["failed", "completed_with_errors"]:

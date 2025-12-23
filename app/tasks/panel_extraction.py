@@ -16,6 +16,7 @@ from app.config.settings import (
     convert_container_path_to_host,
     convert_host_path_to_container
 )
+from app.tasks.cbir import cbir_index_batch
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +221,31 @@ def extract_panels_from_images(
                 logger.info(f"Deleted PANELS.csv: {panels_csv_path}")
             except Exception as e:
                 logger.warning(f"Failed to delete PANELS.csv {panels_csv_path}: {str(e)}")
+
+        # Trigger CBIR indexing for all successfully created panels
+        if result_panel_ids:
+            try:
+                # Get panel documents with their paths and types
+                panel_docs = list(images_col.find(
+                    {"_id": {"$in": [ObjectId(pid) for pid in result_panel_ids]}},
+                    {"_id": 1, "file_path": 1, "panel_type": 1}
+                ))
+                
+                cbir_items = [
+                    {
+                        "image_id": str(doc["_id"]),
+                        "image_path": doc["file_path"],
+                        "labels": [doc.get("panel_type")] if doc.get("panel_type") else []
+                    }
+                    for doc in panel_docs
+                ]
+                
+                if cbir_items:
+                    cbir_index_batch.delay(user_id=user_id, image_items=cbir_items)
+                    logger.info(f"Queued CBIR indexing for {len(cbir_items)} extracted panels")
+            except Exception as cbir_error:
+                logger.warning(f"Failed to queue CBIR indexing for panels: {cbir_error}")
+                # Don't fail panel extraction if CBIR indexing fails to queue
 
         # Success
         result = {

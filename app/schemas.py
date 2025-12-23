@@ -365,6 +365,30 @@ class ImageInDB(BaseModel):
     analysis_ids: List[str] = Field(default_factory=list)
 
 
+class PaginatedImageResponse(BaseModel):
+    """Paginated response for image listing - supports efficient gallery pagination"""
+    items: List["ImageResponse"] = Field(description="List of images for current page")
+    total: int = Field(description="Total number of images matching the query")
+    page: int = Field(description="Current page number (1-indexed)")
+    per_page: int = Field(description="Number of items per page")
+    total_pages: int = Field(description="Total number of pages")
+    has_next: bool = Field(description="Whether there is a next page")
+    has_prev: bool = Field(description="Whether there is a previous page")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "items": [],
+                "total": 150,
+                "page": 1,
+                "per_page": 24,
+                "total_pages": 7,
+                "has_next": True,
+                "has_prev": False
+            }
+        }
+
+
 # ============================================================================
 # IMAGE TYPE MANAGEMENT MODELS
 # ============================================================================
@@ -448,12 +472,19 @@ class PaginatedResponse(BaseModel):
 # Annotation Schemas
 # ============================================================================
 
-class CoordinateInfo(BaseModel):
-    """Annotation coordinates"""
+class PolygonPoint(BaseModel):
+    """A single point in a polygon"""
     x: float = Field(..., description="X coordinate (percentage)")
     y: float = Field(..., description="Y coordinate (percentage)")
-    width: float = Field(..., description="Width (percentage)")
-    height: float = Field(..., description="Height (percentage)")
+
+
+class CoordinateInfo(BaseModel):
+    """Annotation coordinates - supports rectangles, ellipses, and polygons"""
+    x: float = Field(0, description="X coordinate (percentage)")
+    y: float = Field(0, description="Y coordinate (percentage)")
+    width: float = Field(0, description="Width (percentage)")
+    height: float = Field(0, description="Height (percentage)")
+    points: Optional[List[PolygonPoint]] = Field(None, description="Polygon points (for polygon shapes)")
 
     class Config:
         schema_extra = {
@@ -469,20 +500,26 @@ class CoordinateInfo(BaseModel):
 class AnnotationCreate(BaseModel):
     """Annotation creation request"""
     image_id: str = Field(..., description="ID of the image being annotated")
-    text: str = Field(..., min_length=1, max_length=1000, description="Annotation text")
+    text: str = Field("", max_length=1000, description="Annotation text/description")
     coords: CoordinateInfo = Field(..., description="Annotation coordinates")
+    type: Optional[str] = Field("manipulation", description="Annotation type/label (e.g., manipulation, copy-move, splicing)")
+    group_id: Optional[int] = Field(None, description="Group ID for related annotations (e.g., copy-move pairs)")
+    shape_type: Optional[str] = Field("rectangle", description="Shape type: rectangle, ellipse, or polygon")
 
     class Config:
         schema_extra = {
             "example": {
                 "image_id": "507f1f77bcf86cd799439013",
-                "text": "Núcleo celular identificado",
+                "text": "Detected manipulation region",
                 "coords": {
                     "x": 25.5,
                     "y": 30.1,
                     "width": 10.2,
                     "height": 15.8
-                }
+                },
+                "type": "manipulation",
+                "group_id": None,
+                "shape_type": "rectangle"
             }
         }
 
@@ -494,6 +531,9 @@ class AnnotationResponse(BaseModel):
     image_id: str
     text: str
     coords: CoordinateInfo
+    type: Optional[str] = "manipulation"
+    group_id: Optional[int] = None
+    shape_type: Optional[str] = "rectangle"
     created_at: datetime
     updated_at: datetime
 
@@ -755,6 +795,19 @@ class CBIRStatusResponse(BaseModel):
 # ANALYSIS SCHEMAS
 # ============================================================================
 
+class CopyMoveMethod(str, Enum):
+    """Detection method for copy-move analysis"""
+    DENSE = "dense"  # Dense matching (original copy-move-detection module, methods 1-5)
+    KEYPOINT = "keypoint"  # Keypoint matching (copy-move-detection-keypoint module, cross-image only)
+
+
+class KeypointDescriptor(str, Enum):
+    """Descriptor types for keypoint-based copy-move detection"""
+    CV_SIFT = "cv_sift"  # OpenCV SIFT
+    CV_RSIFT = "cv_rsift"  # OpenCV RootSIFT (default, recommended)
+    VLFEAT_SIFT_HEQ = "vlfeat_sift_heq"  # VLFeat SIFT with histogram equalization
+
+
 class AnalysisType(str, Enum):
     SINGLE_IMAGE_COPY_MOVE = "single_image_copy_move"
     CROSS_IMAGE_COPY_MOVE = "cross_image_copy_move"
@@ -781,21 +834,40 @@ class AnalysisBase(BaseModel):
 
 
 class SingleImageAnalysisCreate(BaseModel):
-    """Request to create a single image analysis"""
+    """Request to create a single image analysis (dense method only)"""
     image_id: str
-    method: int = Field(2, ge=1, le=5, description="Detection method (1-5)")
+    # Single-image detection only supports dense method
+    method: CopyMoveMethod = Field(
+        CopyMoveMethod.DENSE,
+        description="Detection method for single image (only 'dense' supported)"
+    )
+    # Dense method sub-parameter (1-5)
+    dense_method: int = Field(2, ge=1, le=5, description="Dense method variant (1-5)")
 
 
 class CrossImageAnalysisCreate(BaseModel):
     """Request to create a cross image analysis"""
     source_image_id: str
     target_image_id: str
-    method: int = Field(2, ge=1, le=5, description="Detection method (1-5)")
+    method: CopyMoveMethod = Field(
+        CopyMoveMethod.KEYPOINT,
+        description="Detection method: 'keypoint' (recommended) or 'dense'"
+    )
+    # Dense method sub-parameter (only used when method='dense')
+    dense_method: int = Field(2, ge=1, le=5, description="Dense method variant (1-5), only used when method='dense'")
+    # Keypoint descriptor (only used when method='keypoint')
+    descriptor: KeypointDescriptor = Field(
+        KeypointDescriptor.CV_RSIFT,
+        description="Keypoint descriptor type, only used when method='keypoint'"
+    )
 
 
 class AnalysisResult(BaseModel):
     """Generic analysis result container"""
-    method: Optional[int] = None
+    # Method can be string ('keypoint', 'dense') for copy-move or int for legacy
+    method: Optional[Any] = None
+    dense_method: Optional[int] = None  # Sub-method for dense detection (1-5)
+    descriptor: Optional[str] = None  # Keypoint descriptor type (cv_sift, cv_rsift, vlfeat_sift_heq)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     matches_image: Optional[str] = None
     clusters_image: Optional[str] = None

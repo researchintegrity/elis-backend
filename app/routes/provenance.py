@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime
 from bson import ObjectId
 
+from typing import Optional, List
+
 from app.utils.security import get_current_user
 from app.db.mongodb import get_images_collection, get_analyses_collection
 from app.schemas import (
@@ -25,6 +27,7 @@ router = APIRouter(
 class ProvenanceRequest(BaseModel):
     """Request to start provenance analysis"""
     image_id: str = Field(..., description="Query image ID")
+    search_image_ids: Optional[List[str]] = Field(None, description="Optional list of image IDs to include in analysis. If empty/None, all user images are used.")
     k: int = Field(10, ge=1, le=100, description="Top-K candidates from CBIR")
     q: int = Field(5, ge=1, le=50, description="Top-Q candidates for expansion")
     max_depth: int = Field(3, ge=1, le=5, description="Maximum expansion depth")
@@ -88,7 +91,8 @@ async def analyze_provenance(
             "k": request.k,
             "q": request.q,
             "max_depth": request.max_depth,
-            "descriptor_type": request.descriptor_type
+            "descriptor_type": request.descriptor_type,
+            "search_image_ids": request.search_image_ids
         }
     }
     result = analyses_col.insert_one(analysis_doc)
@@ -105,6 +109,7 @@ async def analyze_provenance(
         analysis_id=analysis_id,
         user_id=user_id,
         query_image_id=request.image_id,
+        search_image_ids=request.search_image_ids,
         k=request.k,
         q=request.q,
         max_depth=request.max_depth,

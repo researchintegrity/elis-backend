@@ -21,6 +21,7 @@ def provenance_analysis_task(
     analysis_id: str,
     user_id: str,
     query_image_id: str,
+    search_image_ids: list = None,
     k: int = 10,
     q: int = 5,
     max_depth: int = 3,
@@ -58,6 +59,7 @@ def provenance_analysis_task(
         success, message, result = run_provenance_analysis(
             user_id=user_id,
             query_image_id=query_image_id,
+            search_image_ids=search_image_ids,
             k=k,
             q=q,
             max_depth=max_depth,
