@@ -330,6 +330,96 @@ async def list_images(
         )
 
 
+@router.get("/tags", response_model=List[str])
+async def get_all_tags(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get all unique image tags/categories for the current user.
+    
+    Uses MongoDB's distinct() for efficient retrieval without loading image data.
+    This is much more efficient than fetching images and extracting tags client-side.
+    
+    Returns:
+        List of unique tag strings, sorted alphabetically
+    """
+    user_id_str = str(current_user["_id"])
+    images_col = get_images_collection()
+    
+    # Use MongoDB distinct() for efficient unique value retrieval
+    # This queries the database index directly without loading documents
+    tags = images_col.distinct("image_type", {"user_id": user_id_str})
+    
+    # Filter out None/empty values and sort
+    unique_tags = sorted([tag for tag in tags if tag])
+    
+    return unique_tags
+
+
+@router.get("/ids", response_model=dict)
+async def get_all_image_ids(
+    image_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    search: Optional[str] = None,
+    source_type: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get all image IDs for the current user in a single request.
+    
+    This is optimized for "Select All" operations where only IDs are needed.
+    Returns a lightweight response with just IDs instead of full image objects.
+    
+    Supports the same filters as the main /images endpoint.
+    
+    Returns:
+        {"ids": ["id1", "id2", ...], "count": N}
+    """
+    user_id_str = str(current_user["_id"])
+    images_col = get_images_collection()
+    
+    # Build query with same logic as list_images
+    query = {"user_id": user_id_str}
+    
+    # Apply filters
+    if image_type:
+        tags = [t.strip() for t in image_type.split(",") if t.strip()]
+        if tags:
+            query["image_type"] = {"$in": tags}
+    
+    if source_type and source_type != "all":
+        query["source_type"] = source_type
+    
+    if date_from:
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+            query.setdefault("created_at", {})["$gte"] = dt
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+            query.setdefault("created_at", {})["$lte"] = dt
+        except ValueError:
+            pass
+    
+    if search:
+        search_regex = {"$regex": search, "$options": "i"}
+        query["$or"] = [
+            {"filename": search_regex},
+            {"original_filename": search_regex}
+        ]
+    
+    # Only fetch _id field for efficiency
+    cursor = images_col.find(query, {"_id": 1})
+    ids = [str(doc["_id"]) for doc in cursor]
+    
+    return {"ids": ids, "count": len(ids)}
+
 @router.get("/{image_id}", response_model=ImageResponse)
 async def get_image(
     image_id: str,
