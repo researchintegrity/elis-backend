@@ -7,7 +7,7 @@ from app.schemas import (
     CrossImageAnalysisCreate,
     SingleImageAnalysisCreate,
     TruForAnalysisCreate,
-    ExternalAnalysisCreate,
+    ScreeningToolAnalysisCreate,
     AnalysisType,
     AnalysisStatus,
     PaginatedResponse,
@@ -370,7 +370,7 @@ async def download_analysis_result(
         result_type: Type of result to download:
             - Copy-move: 'matches', 'clusters'
             - TruFor: 'pred_map', 'conf_map', 'noiseprint'
-            - External: 'result_image'
+            - Screening Tool: 'result_image'
         current_user: Current authenticated user
         
     Returns:
@@ -378,7 +378,7 @@ async def download_analysis_result(
     """
     user_id_str = str(current_user["_id"])
     
-    # Validate result_type - support copy-move, trufor, and external result types
+    # Validate result_type - support copy-move, trufor, and screening tool result types
     valid_types = ("matches", "clusters", "pred_map", "conf_map", "noiseprint", "result_image")
     if result_type not in valid_types:
         raise HTTPException(
@@ -426,7 +426,7 @@ async def download_analysis_result(
                         file_path = f
                         break
     elif result_type == "result_image":
-        # External analysis uses 'result_image' key directly
+        # Screening tool analysis uses 'result_image' key directly
         file_path = results.get(result_type)
     else:
         # Copy-move uses '{type}_image' keys
@@ -667,8 +667,8 @@ async def analyze_trufor(
     return {"message": "TruFor analysis started", "analysis_id": analysis_id}
 
 
-@router.post("/external", status_code=status.HTTP_201_CREATED, response_model=AnalysisResponse)
-async def save_external_analysis(
+@router.post("/screening-tool", status_code=status.HTTP_201_CREATED, response_model=AnalysisResponse)
+async def save_screening_tool_analysis(
     image_id: str = Form(..., description="ID of the image that was analyzed"),
     analysis_subtype: str = Form(..., description="Subtype of analysis (e.g., 'ela', 'noise_analysis', 'magnifier')"),
     parameters: str = Form("{}", description="JSON string of parameters used in the analysis"),
@@ -677,9 +677,9 @@ async def save_external_analysis(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Save an external/client-side analysis result.
+    Save a screening tool/client-side analysis result.
     
-    This endpoint allows client-side tools (like ELA, Noise Analysis, Magnifier, Histogram)
+    This endpoint allows client-side screening tools (like ELA, Noise Analysis, Magnifier, Histogram)
     to save their analysis results to the database for reproducibility and record-keeping.
     
     Args:
@@ -720,10 +720,10 @@ async def save_external_analysis(
     # Create analysis document
     analyses_col = get_analyses_collection()
     analysis_doc = {
-        "type": AnalysisType.EXTERNAL,
+        "type": AnalysisType.SCREENING_TOOL,
         "user_id": user_id_str,
         "source_image_id": image_id,
-        "status": AnalysisStatus.COMPLETED,  # External analyses are already completed
+        "status": AnalysisStatus.COMPLETED,  # Screening tool analyses are already completed
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
         "parameters": params_dict,
@@ -744,7 +744,7 @@ async def save_external_analysis(
             content = await result_image.read()
             
             # Get output directory for this analysis
-            output_dir = get_analysis_output_path(user_id_str, analysis_id, "external")
+            output_dir = get_analysis_output_path(user_id_str, analysis_id, "screening_tool")
             
             # Generate filename
             file_ext = Path(result_image.filename).suffix.lower() or ".png"
@@ -769,7 +769,7 @@ async def save_external_analysis(
         except Exception as e:
             # Log error but don't fail the request - the analysis record is still valid
             import logging
-            logging.error(f"Failed to save result image for external analysis {analysis_id}: {e}")
+            logging.error(f"Failed to save result image for screening tool analysis {analysis_id}: {e}")
     
     # Update Image document with analysis_id
     images_col = get_images_collection()

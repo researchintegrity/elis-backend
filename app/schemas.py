@@ -828,7 +828,7 @@ class AnalysisType(str, Enum):
     TRUFOR = "trufor"
     CBIR_SEARCH = "cbir_search"
     PROVENANCE = "provenance"
-    EXTERNAL = "external"  # Client-side tools (ELA, Noise Analysis, Magnifier, etc.)
+    SCREENING_TOOL = "screening_tool"  # Client-side screening tools (ELA, Noise Analysis, Magnifier, etc.)
 
 
 class AnalysisStatus(str, Enum):
@@ -873,8 +873,8 @@ class TruForAnalysisCreate(BaseModel):
     )
 
 
-class ExternalAnalysisCreate(BaseModel):
-    """Request to save an external/client-side analysis result"""
+class ScreeningToolAnalysisCreate(BaseModel):
+    """Request to save a screening tool/client-side analysis result"""
     image_id: str = Field(..., description="ID of the image that was analyzed")
     analysis_subtype: str = Field(
         ...,
