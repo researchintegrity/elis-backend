@@ -1186,6 +1186,7 @@ class RelationshipGraphEdge(BaseModel):
     target: str = Field(..., description="Target image ID")
     weight: float = Field(..., description="Edge weight")
     source_type: str = Field(..., description="Relationship source type")
+    id: str = Field(..., description="Relationship ID")
     is_mst_edge: bool = Field(
         default=False,
         description="Whether part of Maximum Spanning Tree (render darker)"

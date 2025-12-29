@@ -312,6 +312,7 @@ async def get_relationship_graph(
                         "target": edge_key[1],
                         "weight": rel.get("weight", 1.0),
                         "source_type": rel.get("source_type", "manual"),
+                        "id": str(rel["_id"]),
                         "is_mst_edge": False  # Updated after MST computation
                     })
             

@@ -143,6 +143,61 @@ GET /images/{image_id}/panels
 
 Returns: Array of all panels extracted from source image
 
+## Relationship Endpoints
+
+Endpoints for managing manual and automatic relationships between images.
+
+### Create Relationship
+```
+POST /relationships
+Content-Type: application/json
+
+{
+    "image1_id": "id1",
+    "image2_id": "id2",
+    "source_type": "manual"
+}
+```
+
+Optional `weight` (0.0-1.0) can be provided. Defaults to 1.0.
+
+### Remove Relationship
+```
+DELETE /relationships/{relationship_id}
+```
+
+### Get Relationships for Image
+```
+GET /images/{image_id}/relationships
+```
+
+Returns list of direct relationships for the specified image.
+
+### Get Relationship Graph
+```
+GET /images/{image_id}/relationship-graph?max_depth=5
+```
+
+Returns graph structure (nodes + edges) for visualization using BFS traversal.
+
+**Query Parameters:**
+- `max_depth`: Maximum depth for BFS traversal (default: 5). Set to `0` for unlimited depth (traverse entire connected component).
+
+Response:
+```json
+{
+    "query_image_id": "id1",
+    "nodes": [
+        {"id": "id1", "label": "img1.png", "is_query": true, "is_flagged": true},
+        {"id": "id2", "label": "img2.png", "is_query": false, "is_flagged": true}
+    ],
+    "edges": [
+        {"source": "id1", "target": "id2", "weight": 1.0, "is_mst_edge": true}
+    ],
+    "mst_edges": [...]
+}
+```
+
 ## CBIR Endpoints (Content-Based Image Retrieval)
 
 CBIR allows searching for visually similar images within the user's collection.
@@ -206,6 +261,62 @@ Content-Type: application/json
 ## Analysis Endpoints
 
 General endpoints for various image analysis tasks.
+
+### Get Analysis Statistics
+```
+GET /analyses/stats
+```
+Returns counts by status for the current user's analyses.
+
+### List Analyses Grouped by Image
+```
+GET /analyses/grouped-by-image?type=screening_tool&page=1&per_page=10
+```
+Returns analyses grouped by source image, useful for comparing multiple analysis runs on the same image.
+
+**Query Parameters:**
+- `page`: Page number (default: 1)
+- `per_page`: Groups per page (1-50, default: 10)
+- `type`: Filter by analysis type (e.g., `screening_tool`)
+- `status`: Filter by status (`pending`, `processing`, `completed`, `failed`)
+- `subtype`: Filter by analysis subtype (e.g., `ela`, `noise`, `gradient`)
+- `source_image_id`: Filter by specific image
+- `sort_by`: Sort groups by `latest` (default), `count`, or `oldest`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Retrieved 5 image groups with 23 total analyses",
+  "data": [
+    {
+      "source_image_id": "image_id_1",
+      "analysis_count": 5,
+      "subtypes": ["ela", "noise", "gradient"],
+      "analysis_types": ["screening_tool"],
+      "latest_analysis": "2025-12-27T10:30:00Z",
+      "oldest_analysis": "2025-12-25T08:00:00Z",
+      "analyses": [
+        {
+          "id": "analysis_id_1",
+          "type": "screening_tool",
+          "status": "completed",
+          "created_at": "2025-12-27T10:30:00Z",
+          "parameters": {"analysis_subtype": "ela", "quality": 90},
+          "results": {"result_image": "/path/to/result.png"}
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 2,
+    "page_size": 10,
+    "total_groups": 15,
+    "total_analyses": 45
+  }
+}
+```
 
 ### Get Analysis Details
 ```
