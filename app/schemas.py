@@ -515,6 +515,9 @@ class AnnotationCreate(BaseModel):
     type: Optional[str] = Field("manipulation", description="Annotation type/label (e.g., manipulation, copy-move, splicing)")
     group_id: Optional[int] = Field(None, description="Group ID for related annotations (e.g., copy-move pairs)")
     shape_type: Optional[Literal["rectangle", "ellipse", "polygon"]] = Field("rectangle", description="Shape type: rectangle, ellipse, or polygon")
+    # Cross-image annotation linking
+    link_id: Optional[str] = Field(None, description="Link ID for cross-image annotation pairs (same link_id = linked pair)")
+    linked_image_id: Optional[str] = Field(None, description="ID of the other image in the linked pair")
 
     class Config:
         schema_extra = {
@@ -544,6 +547,9 @@ class AnnotationResponse(BaseModel):
     type: Optional[str] = "manipulation"
     group_id: Optional[int] = None
     shape_type: Optional[Literal["rectangle", "ellipse", "polygon"]] = "rectangle"
+    # Cross-image annotation linking
+    link_id: Optional[str] = None
+    linked_image_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -567,6 +573,31 @@ class AnnotationResponse(BaseModel):
                 "shape_type": "rectangle",
                 "created_at": "2025-01-01T10:00:00",
                 "updated_at": "2025-01-01T10:00:00"
+            }
+        }
+
+
+# ============================================================================
+# Batch Annotation Schemas
+# ============================================================================
+
+class AnnotationBatchCreate(BaseModel):
+    """Batch annotation creation for linked pairs"""
+    annotations: List[AnnotationCreate] = Field(..., min_length=1, max_length=50, description="List of annotations to create")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "annotations": [
+                    {
+                        "image_id": "507f1f77bcf86cd799439013",
+                        "text": "Matched region A",
+                        "coords": {"x": 25.5, "y": 30.1, "width": 10.2, "height": 15.8},
+                        "type": "copy-move",
+                        "link_id": "link_abc123",
+                        "linked_image_id": "507f1f77bcf86cd799439014"
+                    }
+                ]
             }
         }
 
