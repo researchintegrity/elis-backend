@@ -137,6 +137,28 @@ def get_analyses_collection():
     return collection
 
 
+def get_relationships_collection():
+    """Get image_relationships collection for storing image-to-image relationships"""
+    collection = db_connection.get_collection("image_relationships")
+    
+    # Create indexes for better performance
+    collection.create_index("user_id")
+    collection.create_index("image1_id")
+    collection.create_index("image2_id")
+    collection.create_index("source_type")
+    collection.create_index("created_at")
+    # Unique compound index to prevent duplicate relationships (IDs are normalized/sorted)
+    collection.create_index(
+        [("user_id", 1), ("image1_id", 1), ("image2_id", 1)],
+        unique=True
+    )
+    # Query relationships for an image (check both directions)
+    collection.create_index([("user_id", 1), ("image1_id", 1)])
+    collection.create_index([("user_id", 1), ("image2_id", 1)])
+    
+    return collection
+
+
 def get_database():
     """Get database instance"""
     return db_connection.get_database()

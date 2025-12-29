@@ -1071,3 +1071,169 @@ class AdminUpdateUserStatusRequest(BaseModel):
                 "is_active": False
             }
         }
+
+
+# ============================================================================
+# Image Relationship Schemas
+# ============================================================================
+
+class RelationshipSourceType(str, Enum):
+    """Source of the relationship between images"""
+    PROVENANCE = "provenance"
+    CROSS_COPY_MOVE = "cross_copy_move"
+    SIMILARITY = "similarity"
+    MANUAL = "manual"
+
+
+class ImageRelationshipCreate(BaseModel):
+    """Request to create a relationship between two images"""
+    image1_id: str = Field(..., description="First image ID")
+    image2_id: str = Field(..., description="Second image ID")
+    source_type: RelationshipSourceType = Field(
+        default=RelationshipSourceType.MANUAL,
+        description="Source of the relationship"
+    )
+    source_analysis_id: Optional[str] = Field(
+        None,
+        description="Reference to analysis that discovered this relationship"
+    )
+    weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Relationship strength (0-1, higher = stronger)"
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Additional context (matched keypoints, shared area, etc.)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "image1_id": "507f1f77bcf86cd799439013",
+                "image2_id": "507f1f77bcf86cd799439014",
+                "source_type": "manual",
+                "weight": 1.0
+            }
+        }
+
+
+class ImageRelationshipResponse(BaseModel):
+    """Response model for a relationship"""
+    id: str = Field(alias="_id")
+    user_id: str
+    image1_id: str
+    image2_id: str
+    source_type: str
+    source_analysis_id: Optional[str] = None
+    weight: float
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    created_by: str = Field(description="'system' or user_id for manual")
+    # Enriched field (populated on query)
+    other_image: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Basic info of the related image (filename, thumbnail, is_flagged)"
+    )
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_object_id(cls, v):
+        """Convert MongoDB ObjectId to string"""
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+        json_schema_extra = {
+            "example": {
+                "_id": "507f1f77bcf86cd799439015",
+                "user_id": "507f1f77bcf86cd799439011",
+                "image1_id": "507f1f77bcf86cd799439013",
+                "image2_id": "507f1f77bcf86cd799439014",
+                "source_type": "provenance",
+                "weight": 0.85,
+                "created_at": "2025-01-01T10:00:00",
+                "created_by": "system"
+            }
+        }
+
+
+class RelationshipGraphNode(BaseModel):
+    """Node in the relationship graph"""
+    id: str = Field(..., description="Image ID")
+    label: str = Field(..., description="Image filename")
+    is_flagged: bool = Field(default=False, description="Whether image is flagged")
+    is_query: bool = Field(default=False, description="Whether this is the query image")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "507f1f77bcf86cd799439013",
+                "label": "figure_1.png",
+                "is_flagged": True,
+                "is_query": True
+            }
+        }
+
+
+class RelationshipGraphEdge(BaseModel):
+    """Edge in the relationship graph"""
+    source: str = Field(..., description="Source image ID")
+    target: str = Field(..., description="Target image ID")
+    weight: float = Field(..., description="Edge weight")
+    source_type: str = Field(..., description="Relationship source type")
+    is_mst_edge: bool = Field(
+        default=False,
+        description="Whether part of Maximum Spanning Tree (render darker)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "source": "507f1f77bcf86cd799439013",
+                "target": "507f1f77bcf86cd799439014",
+                "weight": 0.85,
+                "source_type": "provenance",
+                "is_mst_edge": True
+            }
+        }
+
+
+class RelationshipGraphResponse(BaseModel):
+    """Full graph structure for visualization"""
+    query_image_id: str = Field(..., description="The image from which the graph was built")
+    nodes: List[RelationshipGraphNode] = Field(
+        default_factory=list,
+        description="All nodes in the graph"
+    )
+    edges: List[RelationshipGraphEdge] = Field(
+        default_factory=list,
+        description="All edges in the graph"
+    )
+    mst_edges: List[RelationshipGraphEdge] = Field(
+        default_factory=list,
+        description="Maximum Spanning Tree edges (for darker rendering)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query_image_id": "507f1f77bcf86cd799439013",
+                "nodes": [
+                    {"id": "507f1f77bcf86cd799439013", "label": "fig1.png", "is_flagged": True, "is_query": True},
+                    {"id": "507f1f77bcf86cd799439014", "label": "fig2.png", "is_flagged": True, "is_query": False}
+                ],
+                "edges": [
+                    {"source": "507f1f77bcf86cd799439013", "target": "507f1f77bcf86cd799439014", 
+                     "weight": 0.85, "source_type": "provenance", "is_mst_edge": True}
+                ],
+                "mst_edges": [
+                    {"source": "507f1f77bcf86cd799439013", "target": "507f1f77bcf86cd799439014",
+                     "weight": 0.85, "source_type": "provenance", "is_mst_edge": True}
+                ]
+            }
+        }

@@ -14,6 +14,7 @@ from app.utils.file_storage import (
     update_user_storage_in_db
 )
 from app.tasks.cbir import cbir_delete_image
+from app.services.relationship_service import remove_relationships_for_image
 import logging
 import re
 
@@ -89,6 +90,16 @@ async def delete_image_and_artifacts(
     })
     annotations_deleted = result.deleted_count
     
+    # Cascade delete relationships involving this image
+    relationships_deleted = 0
+    try:
+        relationships_deleted = await remove_relationships_for_image(image_id, user_id)
+        if relationships_deleted > 0:
+            logger.info(f"Cascade deleted {relationships_deleted} relationships for image {image_id}")
+    except Exception as e:
+        logger.warning(f"Failed to cascade delete relationships for image {image_id}: {e}")
+        # Continue with deletion even if relationship deletion fails
+    
     # Delete image record from MongoDB
     images_col.delete_one({"_id": img_oid})
     
@@ -97,7 +108,8 @@ async def delete_image_and_artifacts(
     
     return {
         "deleted_id": image_id,
-        "annotations_deleted": annotations_deleted
+        "annotations_deleted": annotations_deleted,
+        "relationships_deleted": relationships_deleted
     }
 
 
