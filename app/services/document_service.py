@@ -8,7 +8,8 @@ from bson import ObjectId
 from app.db.mongodb import (
     get_documents_collection,
     get_images_collection,
-    get_annotations_collection
+    get_single_annotations_collection,
+    get_dual_annotations_collection
 )
 from app.utils.file_storage import (
     delete_file,
@@ -44,7 +45,6 @@ async def delete_document_and_artifacts(
     """
     documents_col = get_documents_collection()
     images_col = get_images_collection()
-    annotations_col = get_annotations_collection()
     
     # Verify document belongs to user
     try:
@@ -103,14 +103,27 @@ async def delete_document_and_artifacts(
     if cbir_deletion_count > 0:
         logger.info(f"Queued CBIR deletion for {cbir_deletion_count} images from document {document_id}")
     
-    # Delete annotations for all extracted images
+    # Delete annotations for all extracted images from both collections
+    single_annotations_col = get_single_annotations_collection()
+    dual_annotations_col = get_dual_annotations_collection()
     annotations_deleted = 0
     if image_ids:
-        result = annotations_col.delete_many({
+        # Delete single-image annotations
+        result = single_annotations_col.delete_many({
             "image_id": {"$in": image_ids},
             "user_id": user_id
         })
-        annotations_deleted = result.deleted_count
+        annotations_deleted += result.deleted_count
+        
+        # Delete dual-image annotations
+        result = dual_annotations_col.delete_many({
+            "user_id": user_id,
+            "$or": [
+                {"source_image_id": {"$in": image_ids}},
+                {"target_image_id": {"$in": image_ids}}
+            ]
+        })
+        annotations_deleted += result.deleted_count
     
     # Delete extracted images from MongoDB
     images_deleted_result = images_col.delete_many({

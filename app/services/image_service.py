@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 from bson import ObjectId
 from app.db.mongodb import (
     get_images_collection,
-    get_annotations_collection,
+    get_single_annotations_collection,
     get_dual_annotations_collection
 )
 from app.utils.file_storage import (
@@ -81,15 +81,27 @@ async def delete_image_and_artifacts(
     if not success:
         raise Exception(f"Failed to delete image file: {error}")
     
-    # Delete associated annotations
-    annotations_col = get_annotations_collection()
+    # Delete associated annotations from both single and dual collections
+    single_annotations_col = get_single_annotations_collection()
+    dual_annotations_col = get_dual_annotations_collection()
     annotations_deleted = 0
-    
-    result = annotations_col.delete_many({
+
+    # Delete single-image annotations
+    result = single_annotations_col.delete_many({
         "image_id": image_id,
         "user_id": user_id
     })
-    annotations_deleted = result.deleted_count
+    annotations_deleted += result.deleted_count
+
+    # Delete dual-image annotations (where this image is source or target)
+    result = dual_annotations_col.delete_many({
+        "user_id": user_id,
+        "$or": [
+            {"source_image_id": image_id},
+            {"target_image_id": image_id}
+        ]
+    })
+    annotations_deleted += result.deleted_count
     
     # Cascade delete relationships involving this image
     relationships_deleted = 0
@@ -163,7 +175,8 @@ async def list_images(
     from datetime import datetime
     
     images_col = get_images_collection()
-    annotations_col = get_annotations_collection()
+    single_annotations_col = get_single_annotations_collection()
+    dual_annotations_col = get_dual_annotations_collection()
     
     # Validate source_type if provided
     if source_type and source_type not in ["extracted", "uploaded", "panel"]:
@@ -180,13 +193,18 @@ async def list_images(
     
     # Handle flagged filter with optional include_annotated
     if flagged is True and include_annotated:
-        # Get all image IDs that have annotations for this user
-        annotated_image_ids = annotations_col.distinct("image_id", {"user_id": user_id})
+        # Get image IDs that have annotations in either collection
+        single_annotated_ids = single_annotations_col.distinct("image_id", {"user_id": user_id})
+        dual_source_ids = dual_annotations_col.distinct("source_image_id", {"user_id": user_id})
+        dual_target_ids = dual_annotations_col.distinct("target_image_id", {"user_id": user_id})
+        
+        # Combine all annotated image IDs
+        all_annotated_ids = set(single_annotated_ids) | set(dual_source_ids) | set(dual_target_ids)
         
         # Use OR condition: flagged OR has annotations
         query["$or"] = [
             {"is_flagged": True},
-            {"_id": {"$in": [ObjectId(id) for id in annotated_image_ids if ObjectId.is_valid(id)]}}
+            {"_id": {"$in": [ObjectId(id) for id in all_annotated_ids if ObjectId.is_valid(id)]}}
         ]
     elif flagged is not None:
         query["is_flagged"] = flagged
