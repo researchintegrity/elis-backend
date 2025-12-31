@@ -990,6 +990,11 @@ class AnalysisResult(BaseModel):
     files: Optional[List[str]] = None
     logs: Optional[Dict[str, Any]] = None
     
+    # TruFor specific fields
+    pred_map: Optional[str] = None  # Prediction/localization map path
+    conf_map: Optional[str] = None  # Confidence map path
+    noiseprint: Optional[str] = None  # Noiseprint map path (optional)
+    
     # CBIR specific fields
     query_image_id: Optional[str] = None
     top_k: Optional[int] = None

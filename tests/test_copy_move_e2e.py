@@ -87,7 +87,7 @@ def poll_analysis(auth_token, analysis_id, timeout=60):
 def test_single_image_copy_move(auth_token, uploaded_image_id):
     """Test single image copy-move detection"""
     headers = {"Authorization": f"Bearer {auth_token}"}
-    payload = {"image_id": uploaded_image_id, "method": 2}
+    payload = {"image_id": uploaded_image_id, "method": "dense", "dense_method": 2}
     
     # 1. Trigger Analysis
     response = requests.post(
@@ -120,7 +120,8 @@ def test_cross_image_copy_move(auth_token, uploaded_image_id):
     payload = {
         "source_image_id": uploaded_image_id,
         "target_image_id": uploaded_image_id,
-        "method": 2
+        "method": "keypoint",
+        "descriptor": "cv_rsift"
     }
     
     # 1. Trigger Analysis

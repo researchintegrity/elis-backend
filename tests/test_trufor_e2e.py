@@ -111,10 +111,13 @@ def test_trufor_detection(auth_token, uploaded_image_id):
     assert "results" in result
     results = result["results"]
     
-    # Check for visualization output
-    assert "visualization" in results
-    assert results["visualization"] is not None
-    assert results["visualization"].endswith(".png")
-    assert "/trufor/" in results["visualization"]
+    # Check for pred_map and conf_map outputs (TruFor now outputs separate maps)
+    assert "pred_map" in results, f"Expected 'pred_map' in results. Got: {results}"
+    assert results["pred_map"] is not None
+    assert results["pred_map"].endswith(".png")
     
-    print(f"TruFor analysis completed successfully. Visualization: {results['visualization']}")
+    assert "conf_map" in results, f"Expected 'conf_map' in results. Got: {results}"
+    assert results["conf_map"] is not None
+    assert results["conf_map"].endswith(".png")
+    
+    print(f"TruFor analysis completed successfully. pred_map: {results['pred_map']}, conf_map: {results['conf_map']}")
