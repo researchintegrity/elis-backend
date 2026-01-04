@@ -19,6 +19,8 @@ import os
 from app.config.settings import convert_container_path_to_host
 from bson import ObjectId
 from unittest.mock import patch, MagicMock
+from fastapi.testclient import TestClient
+from app.main import app
 
 from app.db.mongodb import get_documents_collection, get_images_collection, db_connection
 from app.utils.file_storage import UPLOAD_DIR, delete_directory
@@ -431,6 +433,104 @@ class TestDocumentRetrieval:
         assert response.status_code == 200
         data = response.json()
         assert len(data) <= 2
+
+    def test_get_documents_with_new_pagination(self):
+        """Test new pagination of documents list with page and per_page using TestClient"""
+        client = TestClient(app)
+        
+        # Register and login to get token
+        import uuid
+        unique_id = str(uuid.uuid4())[:8]
+        username = f"testuser_pag_{unique_id}"
+        email = f"testuser_pag_{unique_id}@example.com"
+        password = "TestPassword123"
+        
+        client.post(
+            "/auth/register",
+            json={
+                "username": username,
+                "email": email,
+                "password": password,
+                "full_name": "Test User"
+            }
+        )
+        
+        login_response = client.post(
+            "/auth/login",
+            data={
+                "username": username,
+                "password": password
+            }
+        )
+        token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Upload 5 documents
+        for i in range(5):
+            filename, pdf_content = create_test_pdf(f"test_new_pag_{i}.pdf")
+            client.post(
+                "/documents/upload",
+                files={"file": (filename, io.BytesIO(pdf_content), "application/pdf")},
+                headers=headers
+            )
+        
+        # Get first page (page=1, per_page=2)
+        response = client.get(
+            "/documents?page=1&per_page=2",
+            headers=headers
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Verify response structure
+        assert "items" in data
+        assert "total" in data
+        assert "page" in data
+        assert "per_page" in data
+        assert "total_pages" in data
+        assert "has_next" in data
+        assert "has_prev" in data
+        
+        # Verify values
+        assert len(data["items"]) == 2
+        assert data["total"] == 5
+        assert data["page"] == 1
+        assert data["per_page"] == 2
+        assert data["total_pages"] == 3
+        assert data["has_next"] is True
+        assert data["has_prev"] is False
+        
+        # Get second page
+        response = client.get(
+            "/documents?page=2&per_page=2",
+            headers=headers
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 2
+        assert data["page"] == 2
+        assert data["has_next"] is True
+        assert data["has_prev"] is True
+        
+        # Get last page
+        response = client.get(
+            "/documents?page=3&per_page=2",
+            headers=headers
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 1
+        assert data["page"] == 3
+        assert data["has_next"] is False
+        assert data["has_prev"] is True
+
+        # Test invalid page (page=0) - should fail validation
+        response = client.get(
+            "/documents?page=0&per_page=2",
+            headers=headers
+        )
+        assert response.status_code == 422
     
     def test_get_specific_document(self, test_user_token):
         """Test retrieving specific document by ID"""

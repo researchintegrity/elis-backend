@@ -41,9 +41,8 @@ from app.utils.file_storage import (
 )
 from app.utils.security import get_current_user
 
-import warnings
-
 logger = logging.getLogger(__name__)
+_warned_deprecated = False
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -203,8 +202,8 @@ async def upload_document(
 @router.get("", response_model=Union[PaginatedDocumentResponse, List[DocumentResponse]])
 async def list_documents(
     current_user: dict = Depends(get_current_user),
-    page: Optional[int] = None,
-    per_page: int = Query(12, le=24),
+    page: Optional[int] = Query(None, ge=1),
+    per_page: int = Query(12, ge=1,le=24),
     limit: int = Query(50, deprecated=True),
     offset: int = Query(0, deprecated=True)
 ):
@@ -218,8 +217,8 @@ async def list_documents(
     
     Args:
         current_user: Current authenticated user
-        page: Page number (1-indexed). If provided, returns paginated response.
-        per_page: Number of items per page (default: 12, max: 100)
+        page: Page number (1-indexed, minimum 1). If provided, returns paginated response.
+        per_page: Number of items per page (default: 12, max: 24)
         limit: DEPRECATED - Maximum number of documents to return
         offset: DEPRECATED - Number of documents to skip
         
@@ -234,11 +233,9 @@ async def list_documents(
     use_pagination = page is not None
     
     if not use_pagination:
-        warnings.warn(
-            "The 'limit' and 'offset' parameters are deprecated. Use 'page' and 'per_page' instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
+        if not _warned_deprecated:
+            logger.warning("The 'limit' and 'offset' parameters are deprecated. Use 'page' and 'per_page' instead.")
+            _warned_deprecated = True
     
     if use_pagination:
         # New pagination mode with page/per_page
@@ -251,9 +248,6 @@ async def list_documents(
     
     # Build query
     query = {"user_id": user_id_str}
-    
-    # Get total count for pagination
-    total = documents_col.count_documents(query)
     
     # Query documents for user
     documents = list(
@@ -271,6 +265,9 @@ async def list_documents(
         responses.append(DocumentResponse(**doc))
     
     if use_pagination:
+        # Get total count for pagination
+        total = documents_col.count_documents(query)
+
         # Return paginated response with metadata
         total_pages = math.ceil(total / per_page) if total > 0 else 1
         

@@ -263,7 +263,7 @@ class PaginatedDocumentResponse(BaseModel):
     has_prev: bool = Field(description="Whether there is a previous page")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "items": [],
                 "total": 50,
