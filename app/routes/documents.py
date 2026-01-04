@@ -1,9 +1,11 @@
 """
 Document upload routes for PDF file management
 """
+import logging
+import math
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Union
 
 from bson import ObjectId
 from celery.result import AsyncResult
@@ -17,6 +19,7 @@ from app.db.mongodb import get_documents_collection, get_images_collection
 from app.schemas import (
     DocumentResponse,
     ImageResponse,
+    PaginatedDocumentResponse,
     WatermarkRemovalInitiationResponse,
     WatermarkRemovalRequest,
     WatermarkRemovalStatusResponse,
@@ -37,6 +40,8 @@ from app.utils.file_storage import (
     validate_pdf,
 )
 from app.utils.security import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -193,35 +198,60 @@ async def upload_document(
         )
 
 
-@router.get("", response_model=List[DocumentResponse])
+@router.get("", response_model=Union[PaginatedDocumentResponse, List[DocumentResponse]])
 async def list_documents(
     current_user: dict = Depends(get_current_user),
+    page: Optional[int] = None,
+    per_page: int = 12,
     limit: int = 50,
     offset: int = 0
 ):
     """
-    List all documents uploaded by current user
+    List all documents uploaded by current user with optional pagination.
+    
+    Supports two modes:
+    - **Paginated mode** (recommended): Use `page` and `per_page` params. Returns
+      PaginatedDocumentResponse with metadata (total, total_pages, has_next, has_prev).
+    - **Legacy mode**: Use `limit` and `offset` params. Returns plain list of DocumentResponse.
     
     Args:
         current_user: Current authenticated user
-        limit: Maximum number of documents to return
-        offset: Number of documents to skip
+        page: Page number (1-indexed). If provided, returns paginated response.
+        per_page: Number of items per page (default: 12, max: 100)
+        limit: DEPRECATED - Maximum number of documents to return
+        offset: DEPRECATED - Number of documents to skip
         
     Returns:
-        List of DocumentResponse objects with storage quota info
+        PaginatedDocumentResponse (if page is provided) or List[DocumentResponse] (legacy)
     """
     documents_col = get_documents_collection()
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
     
+    # Determine pagination mode
+    use_pagination = page is not None
+    
+    if use_pagination:
+        # New pagination mode with page/per_page
+        actual_offset = (page - 1) * per_page
+        actual_limit = per_page
+    else:
+        # Legacy mode with limit/offset
+        actual_offset = offset
+        actual_limit = limit
+    
+    # Build query
+    query = {"user_id": user_id_str}
+    
+    # Get total count for pagination
+    total = documents_col.count_documents(query)
+    
     # Query documents for user
     documents = list(
-        documents_col.find(
-            {"user_id": user_id_str}
-        )
+        documents_col.find(query)
         .sort("uploaded_date", -1)
-        .skip(offset)
-        .limit(limit)
+        .skip(actual_offset)
+        .limit(actual_limit)
     )
     
     # Convert to response models with quota info
@@ -231,7 +261,22 @@ async def list_documents(
         doc = augment_with_quota(doc, user_id_str, user_quota)
         responses.append(DocumentResponse(**doc))
     
-    return responses
+    if use_pagination:
+        # Return paginated response with metadata
+        total_pages = math.ceil(total / per_page) if total > 0 else 1
+        
+        return PaginatedDocumentResponse(
+            items=responses,
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages,
+            has_next=page < total_pages,
+            has_prev=page > 1
+        )
+    else:
+        # Legacy mode: return plain list
+        return responses
 
 
 @router.get("/{doc_id}")

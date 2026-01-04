@@ -252,6 +252,30 @@ class DocumentInDB(BaseModel):
     uploaded_date: datetime = Field(default_factory=datetime.utcnow)
 
 
+class PaginatedDocumentResponse(BaseModel):
+    """Paginated response for document listing - supports efficient pagination"""
+    items: List["DocumentResponse"] = Field(description="List of documents for current page")
+    total: int = Field(description="Total number of documents matching the query")
+    page: int = Field(description="Current page number (1-indexed)")
+    per_page: int = Field(description="Number of items per page")
+    total_pages: int = Field(description="Total number of pages")
+    has_next: bool = Field(description="Whether there is a next page")
+    has_prev: bool = Field(description="Whether there is a previous page")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "items": [],
+                "total": 50,
+                "page": 1,
+                "per_page": 12,
+                "total_pages": 5,
+                "has_next": True,
+                "has_prev": False
+            }
+        }
+
+
 # ============================================================================
 # Image Upload Schemas
 # ============================================================================
