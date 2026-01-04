@@ -68,13 +68,26 @@ async def delete_document_and_artifacts(
         raise ResourceNotFoundError("Document", document_id)
     
     # Delete PDF file from disk
-    success, error = delete_file(doc["file_path"])
+    file_path = doc["file_path"]
+    
+    # In TEST environment, we need to convert container path back to host path
+    from app.config.settings import RUNNING_ENV, convert_container_path_to_host
+    if RUNNING_ENV == "TEST":
+        try:
+            file_path = convert_container_path_to_host(file_path)
+        except ValueError:
+            # If conversion fails, try using original path
+            pass
+
+    success, error = delete_file(file_path)
 
     if not success:
-        raise FileOperationError("delete", doc["file_path"], error)
+        raise FileOperationError("delete", str(file_path), error)
     
     # Delete extraction directory
-    extraction_dir = Path(doc["file_path"]).parent.parent / Path(f"images/extracted/{document_id}")
+    # Use the (potentially converted) file_path to derive the extraction directory
+    # ensuring it targets the correct location in both TEST and PROD environments
+    extraction_dir = Path(file_path).parent.parent / Path(f"images/extracted/{document_id}")
     success, error = delete_directory(str(extraction_dir))
     # Note: Directory might not exist, that's OK - we still proceed with DB cleanup
     if not success and "Directory not found" not in error:

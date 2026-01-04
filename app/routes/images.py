@@ -3,6 +3,7 @@ Image upload routes for extracted and user-uploaded image management
 """
 import logging
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Union
@@ -19,10 +20,17 @@ from app.config.settings import (
     convert_host_path_to_container,
 )
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
-from app.db.mongodb import get_documents_collection, get_images_collection
+from app.db.mongodb import (
+    get_documents_collection,
+    get_images_collection,
+    get_indexing_jobs_collection,
+)
 from app.schemas import (
+    BatchUploadResponse,
     ImageResponse,
     ImageTypesUpdateRequest,
+    IndexingJobResponse,
+    IndexingJobStatus,
     PaginatedImageResponse,
     PanelExtractionInitiationResponse,
     PanelExtractionRequest,
@@ -39,7 +47,7 @@ from app.services.panel_extraction_service import (
 )
 from app.services.quota_helpers import augment_with_quota
 from app.services.resource_helpers import get_owned_resource
-from app.tasks.cbir import cbir_index_image, cbir_update_labels
+from app.tasks.cbir import cbir_index_image, cbir_update_labels, cbir_index_batch_with_progress
 from app.utils.file_storage import (
     check_storage_quota,
     get_thumbnail_path,
@@ -237,7 +245,303 @@ async def upload_image(
         )
 
 
-@router.get("", response_model=Union[PaginatedImageResponse, List[ImageResponse]])
+# ============================================================================
+# BATCH UPLOAD AND INDEXING STATUS ENDPOINTS
+# ============================================================================
+
+@router.post("/upload/batch", response_model=BatchUploadResponse, status_code=status.HTTP_202_ACCEPTED)
+async def upload_images_batch(
+    files: List[UploadFile] = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Upload multiple images in a single request with progress tracking.
+    
+    - Validates and saves all images
+    - Creates MongoDB records for each
+    - Starts a single Celery task to index all images with progress tracking
+    - Returns a job_id to poll for indexing progress
+    
+    Args:
+        files: List of image files to upload
+        current_user: Current authenticated user
+        
+    Returns:
+        BatchUploadResponse with job_id for progress tracking
+        
+    Raises:
+        HTTP 400: If no valid images provided
+        HTTP 413: If storage quota would be exceeded
+    """
+    user_id_str = str(current_user["_id"])
+    user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
+    
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one image file is required"
+        )
+    
+    images_col = get_images_collection()
+    uploaded_images = []
+    total_uploaded_size = 0
+    
+    # Process files one at a time to avoid memory issues
+    for file in files:
+        # Read file content
+        content = await file.read()
+        file_size = len(content)
+        
+        # Early validation before quota check
+        is_valid, error_msg = validate_image(file.filename, file_size)
+        if not is_valid:
+            logger.warning(f"Skipping invalid image {file.filename}: {error_msg}")
+            continue
+        
+        # Incremental quota check for this file
+        quota_ok, quota_error = check_storage_quota(
+            user_id_str, 
+            file_size + total_uploaded_size, 
+            user_quota
+        )
+        if not quota_ok:
+            logger.warning(f"Skipping {file.filename}: {quota_error}")
+            # If we have already uploaded some files, continue with what we have
+            # Otherwise, this would fail the entire batch
+            if not uploaded_images:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=quota_error
+                )
+            break  # Stop processing more files, proceed with what we have
+        
+        try:
+            # Save image file
+            file_path, saved_size = save_image_file(
+                user_id_str,
+                content,
+                file.filename,
+                doc_id=None
+            )
+            
+            # Track uploaded size for incremental quota
+            total_uploaded_size += saved_size
+            
+            # Extract EXIF metadata
+            exif_metadata = extract_exif_metadata(file_path)
+            
+            # Create image record
+            img_data = {
+                "user_id": user_id_str,
+                "filename": file.filename,
+                "file_path": file_path,
+                "file_size": saved_size,
+                "source_type": "uploaded",
+                "document_id": None,
+                "pdf_page": None,
+                "page_bbox": None,
+                "extraction_mode": None,
+                "original_filename": file.filename,
+                "image_type": [],
+                "uploaded_date": datetime.utcnow(),
+                "exif_metadata": exif_metadata
+            }
+            
+            result = images_col.insert_one(img_data)
+            image_id = result.inserted_id
+            
+            # Rename file to use MongoDB _id
+            file_ext = Path(file.filename).suffix
+            new_filename = Path(file.filename).with_name(f"{image_id}{file_ext}")
+            
+            old_path = Path(file_path)
+            if not old_path.is_absolute():
+                old_path = Path.cwd() / old_path
+            new_full_path = old_path.parent / new_filename
+            try:
+                old_path.rename(new_full_path)
+                final_path = new_full_path
+                final_filename = new_filename
+            except OSError as rename_err:
+                # If rename fails, keep the original path/filename so DB stays consistent
+                logger.error(
+                    "Failed to rename image file from '%s' to '%s': %s",
+                    old_path,
+                    new_full_path,
+                    rename_err,
+                )
+                final_path = old_path
+                final_filename = Path(file_path).name
+            # Update MongoDB with the actual path
+            storage_path = convert_host_path_to_container(final_path)
+            images_col.update_one(
+                {"_id": image_id},
+                {"$set": {"filename": str(final_filename), "file_path": str(storage_path)}}
+            )
+            
+            uploaded_images.append({
+                "image_id": str(image_id),
+                "image_path": str(storage_path),
+                "labels": []
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to save image {file.filename}: {e}")
+            continue
+    
+    if not uploaded_images:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid images could be uploaded"
+        )
+    
+    # Update user storage
+    try:
+        update_user_storage_in_db(user_id_str)
+    except Exception as e:
+        logger.error(f"Failed to update user storage for user {user_id_str}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user storage after upload"
+        )
+    
+    # Create indexing job in MongoDB
+    job_id = f"idx_{user_id_str}_{int(time.time())}"
+    jobs_col = get_indexing_jobs_collection()
+    
+    job_doc = {
+        "_id": job_id,
+        "user_id": user_id_str,
+        "status": IndexingJobStatus.PENDING.value,
+        "total_images": len(uploaded_images),
+        "processed_images": 0,
+        "indexed_images": 0,
+        "failed_images": 0,
+        "progress_percent": 0.0,
+        "current_step": "Queued for indexing",
+        "errors": [],
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        "completed_at": None
+    }
+
+    try:
+
+        jobs_col.insert_one(job_doc)
+
+    except Exception as e:
+        logger.error(f"Failed to create indexing job document: {e}")
+        # Cleanup uploaded images to avoid orphaned images when job creation fails
+        for img in uploaded_images:
+            image_id = img.get("image_id")
+            if not image_id:
+                continue
+            try:
+                delete_image_and_artifacts(image_id=image_id, user_id=user_id_str)
+            except Exception as cleanup_err:
+                logger.error(
+                    f"Failed to clean up image {image_id} after job creation failure: {cleanup_err}"
+                )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create indexing job for uploaded images. Upload has been rolled back.",
+        )
+    
+    # Start Celery task for batch indexing with progress
+    try:
+        cbir_index_batch_with_progress.delay(
+            job_id=job_id,
+            user_id=user_id_str,
+            image_items=uploaded_images
+        )
+    except Exception as e:
+        logger.error(f"Failed to queue batch indexing task: {e}")
+        # Update job status to failed
+          # Attempt to roll back uploaded images to avoid orphaned resources
+        cleanup_errors = []
+        for item in uploaded_images:
+            image_id = item.get("image_id")
+            if not image_id:
+                continue
+            try:
+                # delete_image_and_artifacts is expected to remove both DB records and files
+                delete_image_and_artifacts(image_id)
+            except Exception as cleanup_exc:
+                err_msg = f"Failed to clean up image {image_id} after indexing queue error: {cleanup_exc}"
+                logger.error(err_msg)
+                cleanup_errors.append(err_msg)
+        # Update job status to failed and record errors
+        error_messages = [f"Queueing error: {str(e)}"] + cleanup_errors
+        jobs_col.update_one(
+            {"_id": job_id},
+            {
+                "$set": {
+                    "status": IndexingJobStatus.FAILED.value,
+                    "current_step": "Failed to queue indexing task",
+                    "errors": error_messages,
+                    "updated_at": datetime.utcnow(),
+                    "completed_at": datetime.utcnow(),
+                }
+            }
+        )
+    
+    return BatchUploadResponse(
+        job_id=job_id,
+        uploaded_count=len(uploaded_images),
+        image_ids=[img["image_id"] for img in uploaded_images],
+        message=f"{len(uploaded_images)} images uploaded, indexing in progress"
+    )
+
+
+@router.get("/indexing-status/{job_id}", response_model=IndexingJobResponse)
+async def get_indexing_status(
+    job_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get the status of a batch indexing job.
+    
+    Poll this endpoint to track progress of batch image indexing.
+    
+    Args:
+        job_id: The job ID returned from batch upload
+        current_user: Current authenticated user
+        
+    Returns:
+        IndexingJobResponse with current progress
+        
+    Raises:
+        HTTP 404: If job not found or doesn't belong to user
+    """
+    user_id_str = str(current_user["_id"])
+    jobs_col = get_indexing_jobs_collection()
+    
+    job = jobs_col.find_one({"_id": job_id, "user_id": user_id_str})
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Indexing job not found"
+        )
+    
+    return IndexingJobResponse(
+        job_id=job["_id"],
+        user_id=job["user_id"],
+        status=IndexingJobStatus(job["status"]),
+        total_images=job["total_images"],
+        processed_images=job.get("processed_images", 0),
+        indexed_images=job.get("indexed_images", 0),
+        failed_images=job.get("failed_images", 0),
+        progress_percent=job.get("progress_percent", 0.0),
+        current_step=job.get("current_step", ""),
+        errors=job.get("errors", []),
+        created_at=job["created_at"],
+        updated_at=job.get("updated_at", job["created_at"]),
+        completed_at=job.get("completed_at")
+    )
+
+
+@router.get("", response_model=PaginatedImageResponse)
 async def list_images(
     current_user: dict = Depends(get_current_user),
     source_type: str = Query(None, description="Filter by 'extracted' or 'uploaded'"),
@@ -249,18 +553,13 @@ async def list_images(
     flagged: Optional[bool] = Query(None, description="Filter by flagged status - True for flagged images only"),
     linked_to_image_id: Optional[str] = Query(None, description="Filter images linked to this image ID via dual annotations"),
     include_annotated: bool = Query(False, description="If true with flagged=true, also include images with annotations"),
-    page: Optional[int] = Query(None, ge=1, description="Page number (1-indexed). If provided, returns paginated response."),
-    per_page: int = Query(24, ge=1, le=100, description="Number of items per page (1-100, default 24)"),
-    limit: int = Query(50, description="DEPRECATED: Use per_page instead. Maximum number of images to return"),
-    offset: int = Query(0, description="DEPRECATED: Use page instead. Number of images to skip")
+    page: int = Query(1, ge=1, description="Page number (1-indexed). default: 1"),
+    per_page: int = Query(24, ge=1, le=100, description="Number of items per page (1-100, default 24)")
 ):
     """
-    List all images uploaded by current user with optional pagination and filtering.
+    List all images uploaded by current user with pagination and filtering.
     
-    Supports two modes:
-    - **Paginated mode** (recommended): Use `page` and `per_page` params. Returns PaginatedImageResponse 
-      with metadata (total, total_pages, has_next, has_prev) for efficient gallery pagination.
-    - **Legacy mode**: Use `limit` and `offset` params. Returns plain list of ImageResponse.
+    Returns PaginatedImageResponse with metadata (total, total_pages, has_next, has_prev) for efficient gallery pagination.
     
     Args:
         current_user: Current authenticated user
@@ -272,29 +571,19 @@ async def list_images(
         search: Optional search string for filename
         flagged: Optional filter by flagged status
         linked_to_image_id: Optional filter for images linked to this ID via dual annotations
-        page: Page number (1-indexed). Enables paginated response mode.
+        page: Page number (1-indexed).
         per_page: Number of items per page (default: 24, max: 100)
-        limit: DEPRECATED - Maximum number of images to return
-        offset: DEPRECATED - Number of images to skip
         
     Returns:
-        PaginatedImageResponse (if page is provided) or List[ImageResponse] (legacy)
+        PaginatedImageResponse
     """
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
     
     try:
-        # Determine pagination mode
-        use_pagination = page is not None
-        
-        if use_pagination:
-            # New pagination mode with page/per_page
-            actual_offset = (page - 1) * per_page
-            actual_limit = per_page
-        else:
-            # Legacy mode with limit/offset
-            actual_offset = offset
-            actual_limit = limit
+        # Pagination
+        actual_offset = (page - 1) * per_page
+        actual_limit = per_page
         
         # Parse image_type from comma-separated string
         parsed_image_type = [t.strip() for t in image_type.split(",")] if image_type else None
@@ -321,23 +610,19 @@ async def list_images(
             img = augment_with_quota(img, user_id_str, user_quota)
             responses.append(ImageResponse(**img))
         
-        if use_pagination:
-            # Return paginated response with metadata
-            total = result["total"]
-            total_pages = math.ceil(total / per_page) if total > 0 else 1
-            
-            return PaginatedImageResponse(
-                items=responses,
-                total=total,
-                page=page,
-                per_page=per_page,
-                total_pages=total_pages,
-                has_next=page < total_pages,
-                has_prev=page > 1
-            )
-        else:
-            # Legacy mode: return plain list
-            return responses
+        # Return paginated response with metadata
+        total = result["total"]
+        total_pages = math.ceil(total / per_page) if total > 0 else 1
+        
+        return PaginatedImageResponse(
+            items=responses,
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages,
+            has_next=page < total_pages,
+            has_prev=page > 1
+        )
     
     except ValueError as e:
         raise HTTPException(

@@ -108,8 +108,8 @@ def test_single_image_copy_move(auth_token, uploaded_image_id):
     
     # 3. Verify Image document has analysis_id
     img_response = requests.get(f"{BASE_URL}/images", headers=headers)
-    images = img_response.json()
-    target_img = next((img for img in images if img["_id"] == uploaded_image_id), None)
+    data = img_response.json()
+    target_img = next((img for img in data["items"] if img["_id"] == uploaded_image_id), None)
     assert target_img is not None
     assert "analysis_ids" in target_img
     assert analysis_id in target_img["analysis_ids"]
@@ -143,7 +143,7 @@ def test_cross_image_copy_move(auth_token, uploaded_image_id):
     
     # 3. Verify Image document has analysis_id
     img_response = requests.get(f"{BASE_URL}/images", headers=headers)
-    images = img_response.json()
-    target_img = next((img for img in images if img["_id"] == uploaded_image_id), None)
+    data = img_response.json()
+    target_img = next((img for img in data["items"] if img["_id"] == uploaded_image_id), None)
     assert target_img is not None
     assert analysis_id in target_img["analysis_ids"]

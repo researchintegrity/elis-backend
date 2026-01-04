@@ -86,9 +86,21 @@ async def delete_image_and_artifacts(
             # Continue with deletion even if CBIR deletion fails to queue
     
     # Delete image file from disk
-    success, error = delete_file(img["file_path"])
+    file_path = img["file_path"]
+    
+    # In TEST environment, we need to convert container path back to host path
+    # because TestClient runs on host but DB has container paths
+    from app.config.settings import RUNNING_ENV, convert_container_path_to_host
+    if RUNNING_ENV == "TEST":
+        try:
+            file_path = convert_container_path_to_host(file_path)
+        except ValueError:
+            # If conversion fails, try using original path
+            pass
+            
+    success, error = delete_file(file_path)
     if not success:
-        raise FileOperationError("delete", img["file_path"], error)
+        raise FileOperationError("delete", str(file_path), error)
     
     # Delete associated annotations from both single and dual collections
     single_annotations_col = get_single_annotations_collection()

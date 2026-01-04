@@ -4,7 +4,11 @@ CBIR (Content-Based Image Retrieval) tasks for async processing
 These tasks handle background indexing and searching operations.
 """
 from app.celery_config import celery_app
-from app.db.mongodb import get_images_collection, get_analyses_collection
+from app.db.mongodb import (
+    get_images_collection,
+    get_analyses_collection,
+    get_indexing_jobs_collection,
+)
 from app.utils.docker_cbir import (
     index_image,
     index_images_batch,
@@ -13,8 +17,8 @@ from app.utils.docker_cbir import (
     delete_user_data,
     update_image_labels,
 )
-from app.config.settings import CELERY_MAX_RETRIES
-from app.schemas import AnalysisStatus
+from app.config.settings import CELERY_MAX_RETRIES, INDEXING_BATCH_CHUNK_SIZE
+from app.schemas import AnalysisStatus, IndexingJobStatus
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -121,6 +125,204 @@ def cbir_index_batch(
             
     except Exception as e:
         logger.error(f"Error batch indexing for user {user_id}: {e}")
+        raise self.retry(exc=e, countdown=60)
+
+
+@celery_app.task(bind=True, max_retries=CELERY_MAX_RETRIES, name="tasks.cbir_index_batch_with_progress")
+def cbir_index_batch_with_progress(
+    self,
+    job_id: str,
+    user_id: str,
+    image_items: list
+):
+    """
+    Index multiple images in batch with progress tracking.
+    
+    This task updates the indexing_jobs collection as it processes images,
+    allowing the frontend to poll for progress.
+    
+    Args:
+        job_id: Unique job ID for tracking
+        user_id: User ID for multi-tenancy
+        image_items: List of dicts with 'image_id', 'image_path', 'labels'
+    """
+    jobs_col = get_indexing_jobs_collection()
+    images_col = get_images_collection()
+    total_images = len(image_items)
+    
+    # Terminal statuses that should not be updated
+    TERMINAL_STATUSES = [
+        IndexingJobStatus.COMPLETED.value,
+        IndexingJobStatus.PARTIAL.value,
+        IndexingJobStatus.FAILED.value
+    ]
+    
+    def update_job_progress(
+        status: str,
+        processed: int,
+        indexed: int,
+        failed: int,
+        current_step: str,
+        errors: list = None,
+        completed: bool = False
+    ):
+        """Helper to update job progress in MongoDB with conditional update"""
+        update_doc = {
+            "status": status,
+            "processed_images": processed,
+            "indexed_images": indexed,
+            "failed_images": failed,
+            "progress_percent": (processed / total_images * 100) if total_images > 0 else 0,
+            "current_step": current_step,
+            "updated_at": datetime.utcnow(),
+        }
+        if errors:
+            update_doc["errors"] = errors
+        if completed:
+            update_doc["completed_at"] = datetime.utcnow()
+        
+        # Use conditional update to prevent overwriting terminal states
+        # Only update if status is not already in a terminal state
+        jobs_col.update_one(
+            {"_id": job_id, "status": {"$nin": TERMINAL_STATUSES}},
+            {"$set": update_doc}
+        )
+    
+    # Initialize progress counters before try block to ensure they're defined in except
+    processed_count = 0
+    indexed_count = 0
+    failed_count = 0
+    errors = []
+    
+    try:
+        logger.info(f"Starting batch indexing with progress for job {job_id}: {total_images} images")
+        
+        # Idempotency check: verify job hasn't already been completed by another task instance
+        existing_job = jobs_col.find_one({"_id": job_id})
+        if existing_job and existing_job.get("status") in TERMINAL_STATUSES:
+            logger.warning(f"Job {job_id} already in terminal state '{existing_job.get('status')}', skipping")
+            return {
+                "job_id": job_id,
+                "status": existing_job.get("status"),
+                "message": "Job already completed by another task instance"
+            }
+        
+        # Update status to processing
+        update_job_progress(
+            status=IndexingJobStatus.PROCESSING.value,
+            processed=0,
+            indexed=0,
+            failed=0,
+            current_step="Starting indexing..."
+        )
+        
+        # Process in chunks for better progress granularity
+        
+        for i in range(0, total_images, INDEXING_BATCH_CHUNK_SIZE):
+            chunk = image_items[i:i + INDEXING_BATCH_CHUNK_SIZE]
+            chunk_size = len(chunk)
+            
+            # Update progress before processing chunk
+            update_job_progress(
+                status=IndexingJobStatus.PROCESSING.value,
+                processed=processed_count,
+                indexed=indexed_count,
+                failed=failed_count,
+                current_step=f"Encoding images {i + 1} to {min(i + chunk_size, total_images)} of {total_images}",
+                errors=errors
+            )
+            
+            # Prepare CBIR items for this chunk
+            cbir_items = [
+                {"image_path": item["image_path"], "labels": item.get("labels", [])}
+                for item in chunk
+            ]
+            
+            # Index the chunk
+            success, message, result = index_images_batch(user_id, cbir_items)
+            
+            if success:
+                chunk_indexed = result.get("indexed_count", 0)
+                chunk_failed = result.get("failed_count", 0)
+                
+                indexed_count += chunk_indexed
+                failed_count += chunk_failed
+                
+                # Only mark images as indexed when the entire chunk succeeded
+                # The CBIR service doesn't return per-image status, so we can't
+                # determine which specific images failed within a partial chunk
+                if chunk_failed == 0:
+                    for item in chunk:
+                        images_col.update_one(
+                            {"_id": ObjectId(item["image_id"])},
+                            {
+                                "$set": {
+                                    "cbir_indexed": True,
+                                    "cbir_indexed_at": datetime.utcnow()
+                                }
+                            }
+                        )
+                else:
+                    # Partial chunk failure - log warning, don't mark any as indexed
+                    # to avoid marking failed images incorrectly
+                    logger.warning(
+                        f"Chunk had partial failures: {chunk_indexed} indexed, {chunk_failed} failed. "
+                        f"Images not marked as indexed due to lack of per-image status."
+                    )
+                    errors.append(
+                        f"Chunk {i // INDEXING_BATCH_CHUNK_SIZE + 1}: {chunk_failed} of {chunk_size} failed"
+                    )
+            else:
+                # Entire chunk failed
+                failed_count += chunk_size
+                errors.append(f"Chunk {i // INDEXING_BATCH_CHUNK_SIZE + 1} failed: {message}")
+                logger.error(f"Chunk indexing failed for job {job_id}: {message}")
+            
+            processed_count += chunk_size
+        
+        # Determine final status
+        if failed_count == 0:
+            final_status = IndexingJobStatus.COMPLETED.value
+            final_step = f"Successfully indexed {indexed_count} images"
+        elif indexed_count > 0:
+            final_status = IndexingJobStatus.PARTIAL.value
+            final_step = f"Indexed {indexed_count} images, {failed_count} failed"
+        else:
+            final_status = IndexingJobStatus.FAILED.value
+            final_step = f"Failed to index all {total_images} images"
+        
+        # Final update
+        update_job_progress(
+            status=final_status,
+            processed=processed_count,
+            indexed=indexed_count,
+            failed=failed_count,
+            current_step=final_step,
+            errors=errors,
+            completed=True
+        )
+        
+        logger.info(f"Job {job_id} completed: {final_step}")
+        return {
+            "status": final_status,
+            "indexed_count": indexed_count,
+            "failed_count": failed_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in batch indexing job {job_id}: {e}")
+        
+        # Update job as failed
+        update_job_progress(
+            status=IndexingJobStatus.FAILED.value,
+            processed=processed_count,
+            indexed=indexed_count,
+            failed=total_images,
+            current_step=f"Error: {str(e)}",
+            errors=[str(e)],
+            completed=True
+        )
+        
         raise self.retry(exc=e, countdown=60)
 
 

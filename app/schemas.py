@@ -252,6 +252,30 @@ class DocumentInDB(BaseModel):
     uploaded_date: datetime = Field(default_factory=datetime.utcnow)
 
 
+class PaginatedDocumentResponse(BaseModel):
+    """Paginated response for document listing - supports efficient pagination"""
+    items: List["DocumentResponse"] = Field(description="List of documents for current page")
+    total: int = Field(description="Total number of documents matching the query")
+    page: int = Field(description="Current page number (1-indexed)")
+    per_page: int = Field(description="Number of items per page")
+    total_pages: int = Field(description="Total number of pages")
+    has_next: bool = Field(description="Whether there is a next page")
+    has_prev: bool = Field(description="Whether there is a previous page")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "items": [],
+                "total": 50,
+                "page": 1,
+                "per_page": 12,
+                "total_pages": 5,
+                "has_next": True,
+                "has_prev": False
+            }
+        }
+
+
 # ============================================================================
 # Image Upload Schemas
 # ============================================================================
@@ -872,6 +896,73 @@ class CBIRStatusResponse(BaseModel):
     healthy: bool
     message: str
     timestamp: datetime
+
+
+# ============================================================================
+# INDEXING JOB SCHEMAS (Batch Image Indexing Progress Tracking)
+# ============================================================================
+
+class IndexingJobStatus(str, Enum):
+    """Status of a batch indexing job"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PARTIAL = "partial"  # Some images failed, others succeeded
+
+
+class IndexingJobResponse(BaseModel):
+    """Response model for indexing job status"""
+    job_id: str = Field(..., description="Unique job identifier")
+    user_id: str = Field(..., description="User who initiated the job")
+    status: IndexingJobStatus = Field(..., description="Current job status")
+    total_images: int = Field(..., description="Total images to index")
+    processed_images: int = Field(0, description="Images processed so far")
+    indexed_images: int = Field(0, description="Images successfully indexed")
+    failed_images: int = Field(0, description="Images that failed to index")
+    progress_percent: float = Field(0.0, description="Progress percentage (0-100)")
+    current_step: str = Field("", description="Current processing step description")
+    errors: List[str] = Field(default_factory=list, description="List of error messages")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = Field(None, description="Completion timestamp")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "job_id": "idx_507f1f77bcf86cd799439011_1704393600",
+                "user_id": "507f1f77bcf86cd799439011",
+                "status": "processing",
+                "total_images": 10,
+                "processed_images": 5,
+                "indexed_images": 5,
+                "failed_images": 0,
+                "progress_percent": 50.0,
+                "current_step": "Encoding image 5 of 10",
+                "errors": [],
+                "created_at": "2025-01-04T18:00:00Z",
+                "updated_at": "2025-01-04T18:01:30Z",
+                "completed_at": None
+            }
+        }
+
+
+class BatchUploadResponse(BaseModel):
+    """Response for batch image upload"""
+    job_id: str = Field(..., description="Indexing job ID for tracking progress")
+    uploaded_count: int = Field(..., description="Number of images uploaded")
+    image_ids: List[str] = Field(..., description="MongoDB IDs of uploaded images")
+    message: str = Field(..., description="Status message")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "job_id": "idx_507f1f77bcf86cd799439011_1704393600",
+                "uploaded_count": 5,
+                "image_ids": ["507f1f77bcf86cd799439013", "507f1f77bcf86cd799439014"],
+                "message": "5 images uploaded, indexing in progress"
+            }
+        }
 
 
 # ============================================================================
