@@ -3,6 +3,7 @@ Image upload routes for extracted and user-uploaded image management
 """
 import logging
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Union
@@ -19,10 +20,17 @@ from app.config.settings import (
     convert_host_path_to_container,
 )
 from app.config.storage_quota import DEFAULT_USER_STORAGE_QUOTA
-from app.db.mongodb import get_documents_collection, get_images_collection
+from app.db.mongodb import (
+    get_documents_collection,
+    get_images_collection,
+    get_indexing_jobs_collection,
+)
 from app.schemas import (
+    BatchUploadResponse,
     ImageResponse,
     ImageTypesUpdateRequest,
+    IndexingJobResponse,
+    IndexingJobStatus,
     PaginatedImageResponse,
     PanelExtractionInitiationResponse,
     PanelExtractionRequest,
@@ -39,7 +47,7 @@ from app.services.panel_extraction_service import (
 )
 from app.services.quota_helpers import augment_with_quota
 from app.services.resource_helpers import get_owned_resource
-from app.tasks.cbir import cbir_index_image, cbir_update_labels
+from app.tasks.cbir import cbir_index_image, cbir_update_labels, cbir_index_batch_with_progress
 from app.utils.file_storage import (
     check_storage_quota,
     get_thumbnail_path,
@@ -235,6 +243,232 @@ async def upload_image(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload failed: {str(e)}"
         )
+
+
+# ============================================================================
+# BATCH UPLOAD AND INDEXING STATUS ENDPOINTS
+# ============================================================================
+
+@router.post("/upload/batch", response_model=BatchUploadResponse, status_code=status.HTTP_202_ACCEPTED)
+async def upload_images_batch(
+    files: List[UploadFile] = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Upload multiple images in a single request with progress tracking.
+    
+    - Validates and saves all images
+    - Creates MongoDB records for each
+    - Starts a single Celery task to index all images with progress tracking
+    - Returns a job_id to poll for indexing progress
+    
+    Args:
+        files: List of image files to upload
+        current_user: Current authenticated user
+        
+    Returns:
+        BatchUploadResponse with job_id for progress tracking
+        
+    Raises:
+        HTTP 400: If no valid images provided
+        HTTP 413: If storage quota would be exceeded
+    """
+    user_id_str = str(current_user["_id"])
+    user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
+    
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one image file is required"
+        )
+    
+    # Calculate total size first
+    file_contents = []
+    total_size = 0
+    for file in files:
+        content = await file.read()
+        file_contents.append((file, content))
+        total_size += len(content)
+    
+    # Check quota for total batch size
+    quota_ok, quota_error = check_storage_quota(user_id_str, total_size, user_quota)
+    if not quota_ok:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=quota_error
+        )
+    
+    images_col = get_images_collection()
+    uploaded_images = []
+    
+    for file, content in file_contents:
+        file_size = len(content)
+        
+        # Validate image
+        is_valid, error_msg = validate_image(file.filename, file_size)
+        if not is_valid:
+            logger.warning(f"Skipping invalid image {file.filename}: {error_msg}")
+            continue
+        
+        try:
+            # Save image file
+            file_path, saved_size = save_image_file(
+                user_id_str,
+                content,
+                file.filename,
+                doc_id=None
+            )
+            
+            # Extract EXIF metadata
+            exif_metadata = extract_exif_metadata(file_path)
+            
+            # Create image record
+            img_data = {
+                "user_id": user_id_str,
+                "filename": file.filename,
+                "file_path": file_path,
+                "file_size": saved_size,
+                "source_type": "uploaded",
+                "document_id": None,
+                "pdf_page": None,
+                "page_bbox": None,
+                "extraction_mode": None,
+                "original_filename": file.filename,
+                "image_type": [],
+                "uploaded_date": datetime.utcnow(),
+                "exif_metadata": exif_metadata
+            }
+            
+            result = images_col.insert_one(img_data)
+            image_id = result.inserted_id
+            
+            # Rename file to use MongoDB _id
+            file_ext = Path(file.filename).suffix
+            new_filename = Path(file.filename).with_name(f"{image_id}{file_ext}")
+            
+            old_path = Path(file_path)
+            if not old_path.is_absolute():
+                old_path = Path.cwd() / old_path
+            
+            new_full_path = old_path.parent / new_filename
+            old_path.rename(new_full_path)
+            
+            # Update MongoDB with new path
+            storage_path = convert_host_path_to_container(old_path.parent / new_filename)
+            images_col.update_one(
+                {"_id": image_id},
+                {"$set": {"filename": str(new_filename), "file_path": str(storage_path)}}
+            )
+            
+            uploaded_images.append({
+                "image_id": str(image_id),
+                "image_path": str(storage_path),
+                "labels": []
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to save image {file.filename}: {e}")
+            continue
+    
+    if not uploaded_images:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid images could be uploaded"
+        )
+    
+    # Update user storage
+    update_user_storage_in_db(user_id_str)
+    
+    # Create indexing job in MongoDB
+    job_id = f"idx_{user_id_str}_{int(time.time())}"
+    jobs_col = get_indexing_jobs_collection()
+    
+    job_doc = {
+        "_id": job_id,
+        "user_id": user_id_str,
+        "status": IndexingJobStatus.PENDING.value,
+        "total_images": len(uploaded_images),
+        "processed_images": 0,
+        "indexed_images": 0,
+        "failed_images": 0,
+        "progress_percent": 0.0,
+        "current_step": "Queued for indexing",
+        "errors": [],
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        "completed_at": None
+    }
+    jobs_col.insert_one(job_doc)
+    
+    # Start Celery task for batch indexing with progress
+    try:
+        cbir_index_batch_with_progress.delay(
+            job_id=job_id,
+            user_id=user_id_str,
+            image_items=uploaded_images
+        )
+    except Exception as e:
+        logger.error(f"Failed to queue batch indexing task: {e}")
+        # Update job status to failed
+        jobs_col.update_one(
+            {"_id": job_id},
+            {"$set": {"status": IndexingJobStatus.FAILED.value, "errors": [str(e)]}}
+        )
+    
+    return BatchUploadResponse(
+        job_id=job_id,
+        uploaded_count=len(uploaded_images),
+        image_ids=[img["image_id"] for img in uploaded_images],
+        message=f"{len(uploaded_images)} images uploaded, indexing in progress"
+    )
+
+
+@router.get("/indexing-status/{job_id}", response_model=IndexingJobResponse)
+async def get_indexing_status(
+    job_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get the status of a batch indexing job.
+    
+    Poll this endpoint to track progress of batch image indexing.
+    
+    Args:
+        job_id: The job ID returned from batch upload
+        current_user: Current authenticated user
+        
+    Returns:
+        IndexingJobResponse with current progress
+        
+    Raises:
+        HTTP 404: If job not found or doesn't belong to user
+    """
+    user_id_str = str(current_user["_id"])
+    jobs_col = get_indexing_jobs_collection()
+    
+    job = jobs_col.find_one({"_id": job_id, "user_id": user_id_str})
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Indexing job not found"
+        )
+    
+    return IndexingJobResponse(
+        job_id=job["_id"],
+        user_id=job["user_id"],
+        status=IndexingJobStatus(job["status"]),
+        total_images=job["total_images"],
+        processed_images=job.get("processed_images", 0),
+        indexed_images=job.get("indexed_images", 0),
+        failed_images=job.get("failed_images", 0),
+        progress_percent=job.get("progress_percent", 0.0),
+        current_step=job.get("current_step", ""),
+        errors=job.get("errors", []),
+        created_at=job["created_at"],
+        updated_at=job.get("updated_at", job["created_at"]),
+        completed_at=job.get("completed_at")
+    )
 
 
 @router.get("", response_model=Union[PaginatedImageResponse, List[ImageResponse]])

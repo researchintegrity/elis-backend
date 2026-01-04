@@ -99,6 +99,9 @@ CBIR_SERVICE_URL = os.getenv(
 )
 CBIR_TIMEOUT = int(os.getenv("CBIR_TIMEOUT", "120"))  # 2 minutes default
 
+# Batch indexing: number of images to process per chunk for progress updates
+INDEXING_BATCH_CHUNK_SIZE = int(os.getenv("INDEXING_BATCH_CHUNK_SIZE", "16"))
+
 # ============================================================================
 # PROVENANCE ANALYSIS SETTINGS
 # ============================================================================

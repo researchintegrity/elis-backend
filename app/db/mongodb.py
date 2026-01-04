@@ -182,6 +182,19 @@ def get_relationships_collection():
     return collection
 
 
+def get_indexing_jobs_collection():
+    """Get indexing_jobs collection for tracking batch indexing progress"""
+    collection = db_connection.get_collection("indexing_jobs")
+    
+    # Create indexes for better performance
+    collection.create_index("user_id")
+    collection.create_index("status")
+    collection.create_index("created_at")
+    collection.create_index([("user_id", 1), ("created_at", -1)])
+    
+    return collection
+
+
 def get_database():
     """Get database instance"""
     return db_connection.get_database()
