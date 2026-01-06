@@ -16,6 +16,7 @@ from app.utils.docker_cbir import (
     delete_image_from_index,
     delete_user_data,
     update_image_labels,
+    check_cbir_health,
 )
 from app.config.settings import CELERY_MAX_RETRIES, INDEXING_BATCH_CHUNK_SIZE
 from app.schemas import AnalysisStatus, IndexingJobStatus
@@ -24,6 +25,37 @@ from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_batch_images(image_items: list, user_id: str) -> list:
+    """
+    Delete all images in a batch when CBIR indexing fails.
+    
+    Uses all-or-nothing policy: if ANY image fails, ALL are deleted.
+    
+    Args:
+        image_items: List of dicts with 'image_id' keys
+        user_id: User ID who owns the images
+        
+    Returns:
+        List of deleted image IDs
+    """
+    # Lazy import to avoid circular import with image_service
+    from app.services.image_service import delete_image_and_artifacts
+    
+    deleted_ids = []
+    for item in image_items:
+        image_id = item.get("image_id")
+        if not image_id:
+            continue
+        try:
+            delete_image_and_artifacts(image_id=image_id, user_id=user_id)
+            deleted_ids.append(image_id)
+            logger.info(f"Cleaned up image {image_id} after CBIR failure")
+        except Exception as cleanup_err:
+            logger.error(f"Failed to cleanup image {image_id}: {cleanup_err}")
+    return deleted_ids
+
 
 
 @celery_app.task(bind=True, max_retries=CELERY_MAX_RETRIES, name="tasks.cbir_index_image")
@@ -85,12 +117,25 @@ def cbir_index_batch(
     """
     Index multiple images in batch asynchronously.
     
+    Uses all-or-nothing policy: if indexing fails, all images are deleted.
+    
     Args:
         user_id: User ID for multi-tenancy
         image_items: List of dicts with 'image_id', 'image_path', 'labels'
     """
     try:
         logger.info(f"Batch indexing {len(image_items)} images for user {user_id}")
+        
+        # Pre-check: verify CBIR is available before processing
+        cbir_healthy, cbir_message = check_cbir_health()
+        if not cbir_healthy:
+            logger.error(f"CBIR service unavailable for batch index: {cbir_message}")
+            deleted_ids = _cleanup_batch_images(image_items, user_id)
+            return {
+                "status": "failed",
+                "error": "Unable to process images at this time.",
+                "deleted_image_ids": deleted_ids
+            }
         
         # Prepare items for CBIR
         cbir_items = [
@@ -120,12 +165,27 @@ def cbir_index_batch(
             logger.info(f"Batch indexed {indexed_count} images for user {user_id}")
             return {"status": "success", "indexed_count": indexed_count}
         else:
+            # CBIR failed - delete all images in the batch
             logger.error(f"Failed to batch index for user {user_id}: {message}")
-            return {"status": "failed", "error": message}
+            deleted_ids = _cleanup_batch_images(image_items, user_id)
+            logger.warning(f"Cleaned up {len(deleted_ids)} images after CBIR failure")
+            return {
+                "status": "failed", 
+                "error": message,
+                "deleted_image_ids": deleted_ids
+            }
             
     except Exception as e:
         logger.error(f"Error batch indexing for user {user_id}: {e}")
-        raise self.retry(exc=e, countdown=60)
+        # Clean up images before retrying (they're gone so retry won't help)
+        deleted_ids = _cleanup_batch_images(image_items, user_id)
+        logger.warning(f"Cleaned up {len(deleted_ids)} images after exception")
+        # Don't retry since images are deleted
+        return {
+            "status": "failed",
+            "error": str(e),
+            "deleted_image_ids": deleted_ids
+        }
 
 
 @celery_app.task(bind=True, max_retries=CELERY_MAX_RETRIES, name="tasks.cbir_index_batch_with_progress")
@@ -213,8 +273,29 @@ def cbir_index_batch_with_progress(
             processed=0,
             indexed=0,
             failed=0,
-            current_step="Starting indexing..."
+            current_step="Checking service availability..."
         )
+        
+        # Pre-check: verify CBIR is available before processing
+        cbir_healthy, cbir_message = check_cbir_health()
+        if not cbir_healthy:
+            logger.error(f"CBIR service unavailable for job {job_id}: {cbir_message}")
+            deleted_ids = _cleanup_batch_images(image_items, user_id)
+            update_job_progress(
+                status=IndexingJobStatus.FAILED.value,
+                processed=total_images,
+                indexed=0,
+                failed=total_images,
+                current_step="Upload failed - images have been removed.",
+                errors=["Unable to process images at this time. Please try again later."],
+                completed=True
+            )
+            return {
+                "status": IndexingJobStatus.FAILED.value,
+                "indexed_count": 0,
+                "failed_count": total_images,
+                "deleted_image_ids": deleted_ids
+            }
         
         # Process in chunks for better progress granularity
         
@@ -263,39 +344,45 @@ def cbir_index_batch_with_progress(
                             }
                         )
                 else:
-                    # Partial chunk failure - log warning, don't mark any as indexed
-                    # to avoid marking failed images incorrectly
+                    # Partial chunk failure - ALL-OR-NOTHING: clean up entire batch
                     logger.warning(
                         f"Chunk had partial failures: {chunk_indexed} indexed, {chunk_failed} failed. "
-                        f"Images not marked as indexed due to lack of per-image status."
+                        f"All-or-nothing policy: deleting all images in batch."
                     )
                     errors.append(
-                        f"Chunk {i // INDEXING_BATCH_CHUNK_SIZE + 1}: {chunk_failed} of {chunk_size} failed"
+                        "Some images could not be processed. All images have been removed."
                     )
+                    # Break out and go to cleanup
+                    failed_count = total_images
+                    break
             else:
-                # Entire chunk failed
-                failed_count += chunk_size
-                errors.append(f"Chunk {i // INDEXING_BATCH_CHUNK_SIZE + 1} failed: {message}")
+                # Entire chunk failed - ALL-OR-NOTHING: clean up entire batch
+                failed_count = total_images
+                errors.append("Upload could not be completed. All images have been removed.")
                 logger.error(f"Chunk indexing failed for job {job_id}: {message}")
+                # Break out and go to cleanup
+                break
             
             processed_count += chunk_size
         
-        # Determine final status
+        # Determine final status and handle cleanup
         if failed_count == 0:
             final_status = IndexingJobStatus.COMPLETED.value
             final_step = f"Successfully indexed {indexed_count} images"
-        elif indexed_count > 0:
-            final_status = IndexingJobStatus.PARTIAL.value
-            final_step = f"Indexed {indexed_count} images, {failed_count} failed"
+            deleted_ids = []
         else:
+            # ALL-OR-NOTHING: Any failure means delete ALL images
             final_status = IndexingJobStatus.FAILED.value
-            final_step = f"Failed to index all {total_images} images"
+            deleted_ids = _cleanup_batch_images(image_items, user_id)
+            errors.append("Upload failed. Please try again when the service is available.")
+            final_step = "Upload failed - images have been removed."
+            logger.warning(f"Job {job_id}: Cleaned up {len(deleted_ids)} images after failure")
         
         # Final update
         update_job_progress(
             status=final_status,
-            processed=processed_count,
-            indexed=indexed_count,
+            processed=total_images,
+            indexed=indexed_count if failed_count == 0 else 0,
             failed=failed_count,
             current_step=final_step,
             errors=errors,
@@ -305,25 +392,37 @@ def cbir_index_batch_with_progress(
         logger.info(f"Job {job_id} completed: {final_step}")
         return {
             "status": final_status,
-            "indexed_count": indexed_count,
-            "failed_count": failed_count
+            "indexed_count": indexed_count if failed_count == 0 else 0,
+            "failed_count": failed_count,
+            "deleted_image_ids": deleted_ids
         }
         
     except Exception as e:
         logger.error(f"Error in batch indexing job {job_id}: {e}")
         
-        # Update job as failed
+        # ALL-OR-NOTHING: Clean up all images on exception
+        deleted_ids = _cleanup_batch_images(image_items, user_id)
+        logger.warning(f"Job {job_id}: Cleaned up {len(deleted_ids)} images after exception")
+        
+        # Update job as failed with cleanup info
         update_job_progress(
             status=IndexingJobStatus.FAILED.value,
-            processed=processed_count,
-            indexed=indexed_count,
+            processed=total_images,
+            indexed=0,
             failed=total_images,
-            current_step=f"Error: {str(e)}",
-            errors=[str(e)],
+            current_step="Upload failed - images have been removed.",
+            errors=["An unexpected error occurred. Please try again."],
             completed=True
         )
         
-        raise self.retry(exc=e, countdown=60)
+        # Don't retry - images are already deleted
+        return {
+            "status": IndexingJobStatus.FAILED.value,
+            "indexed_count": 0,
+            "failed_count": total_images,
+            "deleted_image_ids": deleted_ids,
+            "error": str(e)
+        }
 
 
 @celery_app.task(bind=True, max_retries=CELERY_MAX_RETRIES, name="tasks.cbir_search")
