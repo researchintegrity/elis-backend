@@ -48,6 +48,7 @@ from app.services.panel_extraction_service import (
 from app.services.quota_helpers import augment_with_quota
 from app.services.resource_helpers import get_owned_resource
 from app.tasks.cbir import cbir_index_image, cbir_update_labels, cbir_index_batch_with_progress
+from app.utils.docker_cbir import check_cbir_health
 from app.utils.file_storage import (
     check_storage_quota,
     get_thumbnail_path,
@@ -93,6 +94,15 @@ async def upload_image(
     try:
         import os
         from app.config.settings import convert_container_path_to_host
+        
+        # Pre-flight CBIR health check - block upload if CBIR is unavailable
+        cbir_healthy, cbir_message = check_cbir_health()
+        if not cbir_healthy:
+            logger.warning(f"CBIR service unavailable: {cbir_message}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to upload images at this time. Please try again in a few minutes."
+            )
         
         # Read file content
         content = await file.read()
@@ -275,6 +285,15 @@ async def upload_images_batch(
     """
     user_id_str = str(current_user["_id"])
     user_quota = current_user.get("storage_limit_bytes", DEFAULT_USER_STORAGE_QUOTA)
+    
+    # Pre-flight CBIR health check - block upload if CBIR is unavailable
+    cbir_healthy, cbir_message = check_cbir_health()
+    if not cbir_healthy:
+        logger.warning(f"CBIR service unavailable: {cbir_message}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to upload images at this time. Please try again in a few minutes."
+        )
     
     if not files:
         raise HTTPException(
@@ -990,6 +1009,15 @@ async def initiate_panel_extraction_endpoint(
     try:
         user_id = current_user.get("_id")
         
+        # Pre-flight CBIR health check - block extraction if CBIR is unavailable
+        cbir_healthy, cbir_message = check_cbir_health()
+        if not cbir_healthy:
+            logger.warning(f"CBIR service unavailable: {cbir_message}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to upload images at this time. Please try again in a few minutes."
+            )
+        
         # Validate request
         if not request.image_ids:
             raise HTTPException(
@@ -1022,6 +1050,9 @@ async def initiate_panel_extraction_endpoint(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error_msg
             )
+    except HTTPException:
+        # Re-raise HTTP exceptions (including 503 from CBIR check)
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

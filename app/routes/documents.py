@@ -39,6 +39,7 @@ from app.utils.file_storage import (
     update_user_storage_in_db,
     validate_pdf,
 )
+from app.utils.docker_cbir import check_cbir_health
 from app.utils.security import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,16 @@ async def upload_document(
         HTTP 413: If storage quota would be exceeded
     """
     try:
+        # Pre-flight CBIR health check - block upload if CBIR is unavailable
+        # (extracted images won't be indexable)
+        cbir_healthy, cbir_message = check_cbir_health()
+        if not cbir_healthy:
+            logger.warning(f"CBIR service unavailable: {cbir_message}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to upload documents at this time. Please try again in a few minutes."
+            )
+        
         # Read file content
         content = await file.read()
         file_size = len(content)
