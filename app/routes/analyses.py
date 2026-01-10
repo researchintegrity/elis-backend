@@ -77,7 +77,7 @@ async def get_analysis_stats(
 
 
 @router.get("", response_model=PaginatedResponse)
-async def list_analyses(
+def list_analyses(
     current_user: dict = Depends(get_current_user),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     per_page: int = Query(10, ge=1, le=100, description="Items per page"),
@@ -174,7 +174,7 @@ async def list_analyses(
         )
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail=f"Failed to retrieve analyses: {str(e)}"
         )
 
