@@ -966,6 +966,106 @@ class BatchUploadResponse(BaseModel):
 
 
 # ============================================================================
+# JOB MONITORING SCHEMAS (Unified Background Job Tracking)
+# ============================================================================
+
+class JobType(str, Enum):
+    """Types of background jobs tracked in the jobs dashboard"""
+    CBIR_INDEX = "cbir_index"
+    CBIR_SEARCH = "cbir_search"
+    CBIR_DELETE = "cbir_delete"
+    COPY_MOVE_SINGLE = "copy_move_single"
+    COPY_MOVE_CROSS = "copy_move_cross"
+    TRUFOR = "trufor"
+    PANEL_EXTRACTION = "panel_extraction"
+    IMAGE_EXTRACTION = "image_extraction"
+    WATERMARK_REMOVAL = "watermark_removal"
+    PROVENANCE = "provenance"
+    IMAGE_DELETION = "image_deletion"
+    DOCUMENT_DELETION = "document_deletion"
+
+
+class JobStatus(str, Enum):
+    """Status of a background job"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PARTIAL = "partial"  # Some items succeeded, others failed
+
+
+class JobLogResponse(BaseModel):
+    """Response model for a job log entry"""
+    job_id: str = Field(..., description="Unique job identifier")
+    user_id: str = Field(..., description="User who initiated the job")
+    job_type: JobType = Field(..., description="Type of background job")
+    celery_task_id: Optional[str] = Field(None, description="Celery task ID if applicable")
+    status: JobStatus = Field(..., description="Current job status")
+    title: str = Field(..., description="Human-readable job title")
+    progress_percent: float = Field(0.0, description="Progress percentage (0-100)")
+    current_step: str = Field("", description="Current processing step description")
+    input_data: Optional[Dict[str, Any]] = Field(None, description="Job input parameters")
+    output_data: Optional[Dict[str, Any]] = Field(None, description="Job results summary")
+    errors: List[str] = Field(default_factory=list, description="Error messages if any")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = Field(None, description="When processing started")
+    completed_at: Optional[datetime] = Field(None, description="When job completed")
+    expires_at: Optional[datetime] = Field(None, description="When job log will be deleted")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "job_id": "job_507f1f77bcf86cd799439011_1704393600_abc12345",
+                "user_id": "507f1f77bcf86cd799439011",
+                "job_type": "trufor",
+                "celery_task_id": "abc123-def456-ghi789",
+                "status": "completed",
+                "title": "TruFor Analysis on image.jpg",
+                "progress_percent": 100.0,
+                "current_step": "Completed",
+                "created_at": "2025-01-04T18:00:00Z",
+                "updated_at": "2025-01-04T18:01:30Z",
+                "completed_at": "2025-01-04T18:01:30Z",
+                "expires_at": "2025-01-11T18:01:30Z"
+            }
+        }
+
+
+class JobListResponse(BaseModel):
+    """Paginated list of jobs for dashboard table"""
+    items: List[JobLogResponse]
+    total: int = Field(..., description="Total number of jobs matching filters")
+    page: int = Field(..., description="Current page number")
+    per_page: int = Field(..., description="Items per page")
+    total_pages: int = Field(..., description="Total number of pages")
+    has_next: bool = Field(..., description="Whether there is a next page")
+    has_prev: bool = Field(..., description="Whether there is a previous page")
+
+
+class JobStatsResponse(BaseModel):
+    """Summary statistics for jobs dashboard header cards"""
+    total_jobs: int = Field(..., description="Total jobs count")
+    pending: int = Field(0, description="Jobs waiting to start")
+    processing: int = Field(0, description="Jobs currently running")
+    completed: int = Field(0, description="Successfully completed jobs")
+    failed: int = Field(0, description="Failed jobs")
+    by_type: Dict[str, int] = Field(default_factory=dict, description="Job counts by type")
+
+
+class JobNotification(BaseModel):
+    """SSE notification payload for real-time job status changes"""
+    event: str = Field(..., description="Event type: job_started, job_progress, job_completed, job_failed")
+    job_id: str = Field(..., description="Job identifier")
+    job_type: str = Field(..., description="Type of job")
+    status: str = Field(..., description="Current status")
+    title: Optional[str] = Field(None, description="Job title for display")
+    progress_percent: Optional[float] = Field(None, description="Progress if applicable")
+    current_step: Optional[str] = Field(None, description="Current step if applicable")
+    error: Optional[str] = Field(None, description="Error message if failed")
+
+
+# ============================================================================
 # ANALYSIS SCHEMAS
 # ============================================================================
 

@@ -202,6 +202,33 @@ def get_indexing_jobs_collection():
     return collection
 
 
+# Flag to track if jobs indexes have been created
+_jobs_indexes_created = False
+
+
+def get_jobs_collection():
+    """Get jobs collection for unified background job tracking with TTL expiration"""
+    global _jobs_indexes_created
+    collection = db_connection.get_collection("jobs")
+    
+    # Create indexes only once (on first access)
+    if not _jobs_indexes_created:
+        try:
+            collection.create_index("user_id", background=True)
+            collection.create_index("job_type", background=True)
+            collection.create_index("status", background=True)
+            collection.create_index("created_at", background=True)
+            collection.create_index([("user_id", 1), ("created_at", -1)], background=True)
+            collection.create_index([("user_id", 1), ("job_type", 1), ("created_at", -1)], background=True)
+            # TTL index: auto-delete documents when expires_at timestamp passes
+            collection.create_index("expires_at", expireAfterSeconds=0, background=True)
+            _jobs_indexes_created = True
+        except Exception as e:
+            logger.warning(f"Error creating indexes for jobs collection: {e}")
+    
+    return collection
+
+
 def get_database():
     """Get database instance"""
     return db_connection.get_database()

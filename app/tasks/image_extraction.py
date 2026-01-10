@@ -7,6 +7,8 @@ from app.db.mongodb import get_documents_collection, get_images_collection
 from app.utils.file_storage import figure_extraction_hook
 from app.utils.metadata_parser import parse_pdf_extraction_filename, is_pdf_extraction_filename, extract_exif_metadata
 from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_host_path_to_container
+from app.schemas import JobType, JobStatus
+from app.services.job_logger import create_job_log, update_job_progress, complete_job
 from app.tasks.cbir import cbir_index_batch
 from bson import ObjectId
 from datetime import datetime
@@ -40,8 +42,19 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
         Retries automatically with exponential backoff on failure
     """
     documents_col = get_documents_collection()
+    job_id = None
     
     try:
+        # Create job log entry
+        job_id = create_job_log(
+            user_id=user_id,
+            job_type=JobType.IMAGE_EXTRACTION,
+            title="PDF Image Extraction",
+            celery_task_id=self.request.id,
+            input_data={"doc_id": doc_id}
+        )
+        
+        update_job_progress(job_id, user_id, JobStatus.PROCESSING, 10, "Starting extraction...")
         logger.info(f"Starting image extraction for doc_id={doc_id}")
         
         # Update status to processing
@@ -55,6 +68,8 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
                 }
             }
         )
+        
+        update_job_progress(job_id, user_id, None, 30, "Running PDF extraction...")
         
         # Run extraction using existing hook
         extracted_count, extraction_errors, extracted_files = figure_extraction_hook(
@@ -75,6 +90,8 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
             f"Extraction completed for doc_id={doc_id}: "
             f"extracted={extracted_count}, errors={len(extraction_errors)}\n"
         )
+        
+        update_job_progress(job_id, user_id, None, 60, "Processing extracted images...")
         
         # Store individual image records in images collection
         images_col = get_images_collection()
@@ -214,6 +231,26 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
         )
         
         status = "success" if extraction_status=="completed" else "failed"
+        
+        # Complete job
+        if extraction_status == "completed":
+            complete_job(
+                job_id,
+                user_id,
+                JobStatus.COMPLETED,
+                {"doc_id": doc_id, "extracted_count": extracted_count},
+            )
+        elif extraction_status == "completed_with_errors":
+            complete_job(
+                job_id,
+                user_id,
+                JobStatus.PARTIAL,
+                {"doc_id": doc_id, "extracted_count": extracted_count},
+                errors=extraction_errors,
+            )
+        else:
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=extraction_errors)
+        
         result = {
             "doc_id": doc_id,
             "status": status,
@@ -260,6 +297,8 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
                 }
             }
         )
+        if job_id:
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=["Task execution timeout"])
         raise
 
     except Exception as exc:
@@ -277,6 +316,8 @@ def extract_images_from_document(self, doc_id: str, user_id: str, pdf_path: str)
                     }
                 }
             )
+            if job_id:
+                complete_job(job_id, user_id, JobStatus.FAILED, errors=[f"Max retries reached: {str(exc)}"])
             raise exc
         countdown = 5 * (CELERY_RETRY_BACKOFF_BASE ** self.request.retries)
         logger.info(f"Retrying in {countdown} seconds (attempt {self.request.retries + 1}/{CELERY_MAX_RETRIES})")

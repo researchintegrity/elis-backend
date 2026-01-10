@@ -6,7 +6,8 @@ from app.celery_config import celery_app
 from app.db.mongodb import get_analyses_collection
 from app.utils.docker_trufor import run_trufor_detection_with_docker
 from app.config.settings import CELERY_MAX_RETRIES
-from app.schemas import AnalysisStatus
+from app.schemas import AnalysisStatus, JobType, JobStatus
+from app.services.job_logger import create_job_log, update_job_progress, complete_job
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -33,6 +34,7 @@ def detect_trufor(
         save_noiseprint: Whether to save the noiseprint map (default: False)
     """
     analyses_col = get_analyses_collection()
+    job_id = None
     
     def update_status(status_msg: str):
         """Callback to update analysis status in DB"""
@@ -46,11 +48,24 @@ def detect_trufor(
                     }
                 }
             )
+            # Also update job progress
+            if job_id:
+                update_job_progress(job_id, user_id, None, None, status_msg)
         except Exception as e:
             logger.error(f"Failed to update status for analysis {analysis_id}: {e}")
 
     try:
+        # Create job log entry
+        job_id = create_job_log(
+            user_id=user_id,
+            job_type=JobType.TRUFOR,
+            title="TruFor Forgery Detection",
+            celery_task_id=self.request.id,
+            input_data={"image_id": image_id, "analysis_id": analysis_id, "save_noiseprint": save_noiseprint}
+        )
+        
         # Update status to processing
+        update_job_progress(job_id, user_id, JobStatus.PROCESSING, 10, "Starting TruFor detection...")
         analyses_col.update_one(
             {"_id": ObjectId(analysis_id)},
             {
@@ -97,6 +112,7 @@ def detect_trufor(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.COMPLETED, {"analysis_id": analysis_id})
             logger.info(f"TruFor detection completed for analysis {analysis_id}")
             return {"status": "completed", "results": results}
         else:
@@ -113,6 +129,7 @@ def detect_trufor(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[message])
             return {"status": "failed", "error": message}
 
     except Exception as e:
@@ -129,6 +146,8 @@ def detect_trufor(
                     }
                 }
             )
+            if job_id:
+                complete_job(job_id, user_id, JobStatus.FAILED, errors=[str(e)])
         except:
             pass
         raise self.retry(exc=e)

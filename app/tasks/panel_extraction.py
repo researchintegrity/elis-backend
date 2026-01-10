@@ -16,6 +16,8 @@ from app.config.settings import (
     convert_container_path_to_host,
     convert_host_path_to_container
 )
+from app.schemas import JobType, JobStatus
+from app.services.job_logger import create_job_log, update_job_progress, complete_job
 from app.tasks.cbir import cbir_index_batch
 
 logger = logging.getLogger(__name__)
@@ -54,8 +56,19 @@ def extract_panels_from_images(
     """
     images_col = get_images_collection()
     task_id = self.request.id
+    job_id = None
 
     try:
+        # Create job log entry
+        job_id = create_job_log(
+            user_id=user_id,
+            job_type=JobType.PANEL_EXTRACTION,
+            title=f"Panel Extraction ({len(image_ids)} images)",
+            celery_task_id=task_id,
+            input_data={"image_ids": image_ids}
+        )
+        
+        update_job_progress(job_id, user_id, JobStatus.PROCESSING, 10, "Validating images...")
         logger.info(
             f"Starting panel extraction for user_id={user_id}, "
             f"task_id={task_id}, image_count={len(image_ids)}"
@@ -87,6 +100,8 @@ def extract_panels_from_images(
                     task_id, image_ids, user_id, error_msg
                 )
 
+        update_job_progress(job_id, user_id, None, 30, "Running Docker panel extraction...")
+        
         # Run panel extraction using Docker
         success, status_message, output_info = extract_panels_with_docker(
             image_ids=image_ids,
@@ -96,6 +111,7 @@ def extract_panels_from_images(
 
         if not success:
             logger.error(f"Panel extraction failed: {status_message}")
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[status_message])
             return _handle_panel_extraction_failure(
                 task_id, image_ids, user_id, status_message
             )
@@ -105,6 +121,7 @@ def extract_panels_from_images(
         panels_count = len(panels_data)
         output_dir = output_info.get("output_dir")
 
+        update_job_progress(job_id, user_id, None, 60, f"Processing {panels_count} extracted panels...")
         logger.info(f"Panel extraction completed. Processing {panels_count} panels...")
 
         result_panel_ids = []
@@ -248,6 +265,11 @@ def extract_panels_from_images(
                 # Don't fail panel extraction if CBIR indexing fails to queue
 
         # Success
+        complete_job(job_id, user_id, JobStatus.COMPLETED, {
+            "extracted_panels_count": panels_count,
+            "result_panel_ids_count": len(result_panel_ids)
+        })
+        
         result = {
             "task_id": task_id,
             "status": "completed",
@@ -264,6 +286,8 @@ def extract_panels_from_images(
     except SoftTimeLimitExceeded:
         error_msg = f"Panel extraction task timed out for user_id={user_id}"
         logger.error(error_msg)
+        if job_id:
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[error_msg])
         return _handle_panel_extraction_failure(task_id, image_ids, user_id, error_msg)
 
     except Exception as e:
@@ -276,6 +300,8 @@ def extract_panels_from_images(
             raise self.retry(exc=e, countdown=retry_delay)
         except self.MaxRetriesExceededError:
             logger.error(f"Max retries exceeded for panel extraction task {task_id}")
+            if job_id:
+                complete_job(job_id, user_id, JobStatus.FAILED, errors=[error_msg])
             return _handle_panel_extraction_failure(task_id, image_ids, user_id, error_msg)
 
 

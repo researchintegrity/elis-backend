@@ -7,6 +7,8 @@ from app.celery_config import celery_app
 from app.db.mongodb import get_documents_collection, get_images_collection
 from app.utils.docker_watermark import remove_watermark_with_docker
 from app.config.settings import CELERY_MAX_RETRIES, CELERY_RETRY_BACKOFF_BASE, convert_host_path_to_container
+from app.schemas import JobType, JobStatus
+from app.services.job_logger import create_job_log, update_job_progress, complete_job
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -46,13 +48,24 @@ def remove_watermark_from_document(
         Retries automatically with exponential backoff on failure
     """
     documents_col = get_documents_collection()
+    job_id = None
     
     try:
+        # Create job log entry
+        job_id = create_job_log(
+            user_id=user_id,
+            job_type=JobType.WATERMARK_REMOVAL,
+            title=f"Watermark Removal (mode {aggressiveness_mode})",
+            celery_task_id=self.request.id,
+            input_data={"doc_id": doc_id, "mode": aggressiveness_mode}
+        )
+        
         logger.info(
             f"Starting watermark removal for doc_id={doc_id}, mode={aggressiveness_mode}"
         )
         
         # Update status to processing
+        update_job_progress(job_id, user_id, JobStatus.PROCESSING, 10, "Starting watermark removal...")
         documents_col.update_one(
             {"_id": ObjectId(doc_id)},
             {
@@ -64,6 +77,8 @@ def remove_watermark_from_document(
                 }
             }
         )
+        
+        update_job_progress(job_id, user_id, None, 30, "Running Docker watermark removal...")
         
         # Run watermark removal using Docker
         success, status_message, output_file_info = remove_watermark_with_docker(
@@ -86,6 +101,8 @@ def remove_watermark_from_document(
                 f"Watermark removal successful for doc_id={doc_id}: "
                 f"output_file={output_filename}, size={output_file_size}"
             )
+            
+            update_job_progress(job_id, user_id, None, 80, "Creating cleaned document record...")
             
             # Create a new document record for the cleaned PDF
             # (keeping original document intact)
@@ -134,6 +151,20 @@ def remove_watermark_from_document(
             {"$set": update_data}
         )
         
+        # Complete job
+        if success:
+            complete_job(
+                job_id,
+                user_id,
+                JobStatus.COMPLETED,
+                {
+                    "doc_id": doc_id,
+                    "cleaned_document_id": update_data.get("cleaned_document_id"),
+                },
+            )
+        else:
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[status_message])
+        
         return {
             "doc_id": doc_id,
             "status": watermark_status,
@@ -155,6 +186,8 @@ def remove_watermark_from_document(
                 }
             }
         )
+        if job_id:
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[error_msg])
         
         raise
     
@@ -173,6 +206,8 @@ def remove_watermark_from_document(
                 }
             }
         )
+        if job_id:
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[error_msg])
         
         # Retry with exponential backoff
         retry_delay = CELERY_RETRY_BACKOFF_BASE ** self.request.retries

@@ -7,7 +7,8 @@ from app.celery_config import celery_app
 from app.db.mongodb import get_analyses_collection
 from app.services.provenance_service import run_provenance_analysis
 from app.services.relationship_service import create_relationship
-from app.schemas import AnalysisStatus
+from app.schemas import AnalysisStatus, JobType, JobStatus
+from app.services.job_logger import create_job_log, update_job_progress, complete_job
 from app.config.settings import CELERY_MAX_RETRIES
 from bson import ObjectId
 from datetime import datetime
@@ -117,9 +118,26 @@ def provenance_analysis_task(
         descriptor_type: Descriptor type
     """
     analyses_col = get_analyses_collection()
+    job_id = None
     
     try:
+        # Create job log entry
+        job_id = create_job_log(
+            user_id=user_id,
+            job_type=JobType.PROVENANCE,
+            title="Provenance Analysis",
+            celery_task_id=self.request.id,
+            input_data={
+                "query_image_id": query_image_id,
+                "analysis_id": analysis_id,
+                "k": k,
+                "q": q,
+                "max_depth": max_depth
+            }
+        )
+        
         # Update status to processing
+        update_job_progress(job_id, user_id, JobStatus.PROCESSING, 10, "Running provenance analysis...")
         analyses_col.update_one(
             {"_id": ObjectId(analysis_id)},
             {
@@ -168,6 +186,7 @@ def provenance_analysis_task(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.COMPLETED, {"analysis_id": analysis_id, "relationships_created": relationships_created})
             logger.info(f"Provenance analysis {analysis_id} completed successfully")
             return {"status": "completed", "result": result}
         else:
@@ -181,9 +200,9 @@ def provenance_analysis_task(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[message])
             logger.error(f"Provenance analysis {analysis_id} failed: {message}")
             return {"status": "failed", "error": message}
-            
     except Exception as e:
         logger.error(f"Error in provenance analysis {analysis_id}: {e}")
         analyses_col.update_one(
@@ -196,5 +215,6 @@ def provenance_analysis_task(
                 }
             }
         )
+        if job_id:
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[str(e)])
         raise self.retry(exc=e, countdown=60)
-

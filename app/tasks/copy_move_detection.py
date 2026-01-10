@@ -10,7 +10,8 @@ from app.celery_config import celery_app
 from app.db.mongodb import get_analyses_collection
 from app.utils.docker_copy_move import run_copy_move_detection_with_docker
 from app.config.settings import CELERY_MAX_RETRIES
-from app.schemas import AnalysisStatus, AnalysisType
+from app.schemas import AnalysisStatus, AnalysisType, JobType, JobStatus
+from app.services.job_logger import create_job_log, update_job_progress, complete_job
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -45,9 +46,20 @@ def detect_copy_move(
         dense_method: Dense method variant (1-5), only used when method='dense'
     """
     analyses_col = get_analyses_collection()
+    job_id = None
     
     try:
+        # Create job log entry
+        job_id = create_job_log(
+            user_id=user_id,
+            job_type=JobType.COPY_MOVE_SINGLE,
+            title=f"Copy-Move Detection ({method})",
+            celery_task_id=self.request.id,
+            input_data={"image_id": image_id, "analysis_id": analysis_id, "method": method}
+        )
+        
         # Update status to processing
+        update_job_progress(job_id, user_id, JobStatus.PROCESSING, 10, "Starting detection...")
         analyses_col.update_one(
             {"_id": ObjectId(analysis_id)},
             {
@@ -61,6 +73,8 @@ def detect_copy_move(
         method_desc = f"{method}" + (f" (variant {dense_method})" if method == METHOD_DENSE else "")
         logger.info(f"Starting copy-move detection for analysis {analysis_id} (image {image_id}) with method {method_desc}")
         
+        update_job_progress(job_id, user_id, None, 30, "Running detection algorithm...")
+        
         # Run detection
         success, message, results = run_copy_move_detection_with_docker(
             analysis_id=analysis_id,
@@ -70,6 +84,8 @@ def detect_copy_move(
             method=method,
             dense_method=dense_method
         )
+        
+        update_job_progress(job_id, user_id, None, 80, "Processing results...")
         
         if success:
             # Build result metadata
@@ -94,6 +110,7 @@ def detect_copy_move(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.COMPLETED, {"analysis_id": analysis_id})
             logger.info(f"Copy-move detection completed for analysis {analysis_id}")
             return {"status": "completed", "results": results}
         else:
@@ -109,6 +126,7 @@ def detect_copy_move(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[message])
             return {"status": "failed", "error": message}
 
     except Exception as e:
@@ -124,6 +142,8 @@ def detect_copy_move(
                     }
                 }
             )
+            if job_id:
+                complete_job(job_id, user_id, JobStatus.FAILED, errors=[str(e)])
         except Exception as db_error:
             logger.error(f"Failed to update analysis status to failed: {db_error}")
         
@@ -158,9 +178,25 @@ def detect_copy_move_cross(
         descriptor: Keypoint descriptor type, only used when method='keypoint'
     """
     analyses_col = get_analyses_collection()
+    job_id = None
     
     try:
+        # Create job log entry
+        job_id = create_job_log(
+            user_id=user_id,
+            job_type=JobType.COPY_MOVE_CROSS,
+            title=f"Cross-Image Copy-Move Detection ({method})",
+            celery_task_id=self.request.id,
+            input_data={
+                "source_image_id": source_image_id,
+                "target_image_id": target_image_id,
+                "analysis_id": analysis_id,
+                "method": method
+            }
+        )
+        
         # Update status to processing
+        update_job_progress(job_id, user_id, JobStatus.PROCESSING, 10, "Starting detection...")
         analyses_col.update_one(
             {"_id": ObjectId(analysis_id)},
             {
@@ -180,6 +216,8 @@ def detect_copy_move_cross(
             f"(source: {source_image_id}, target: {target_image_id}) with method {method_desc}"
         )
         
+        update_job_progress(job_id, user_id, None, 30, "Running detection algorithm...")
+        
         # Run detection
         success, message, results = run_copy_move_detection_with_docker(
             analysis_id=analysis_id,
@@ -191,6 +229,8 @@ def detect_copy_move_cross(
             dense_method=dense_method,
             descriptor=descriptor
         )
+        
+        update_job_progress(job_id, user_id, None, 80, "Processing results...")
         
         if success:
             # Build result metadata
@@ -217,6 +257,7 @@ def detect_copy_move_cross(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.COMPLETED, {"analysis_id": analysis_id})
             logger.info(f"Cross-image copy-move detection completed for analysis {analysis_id}")
             return {"status": "completed", "results": results}
         else:
@@ -232,6 +273,7 @@ def detect_copy_move_cross(
                     }
                 }
             )
+            complete_job(job_id, user_id, JobStatus.FAILED, errors=[message])
             return {"status": "failed", "error": message}
 
     except Exception as e:
@@ -247,6 +289,8 @@ def detect_copy_move_cross(
                     }
                 }
             )
+            if job_id:
+                complete_job(job_id, user_id, JobStatus.FAILED, errors=[str(e)])
         except Exception as db_error:
             logger.error(f"Failed to update analysis status to failed: {db_error}")
         

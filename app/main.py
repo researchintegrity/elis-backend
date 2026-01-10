@@ -18,6 +18,7 @@ from app.routes import (
     documents,
     dual_annotations,
     images,
+    jobs,
     provenance,
     relationships,
     single_annotations,
@@ -67,6 +68,7 @@ app.include_router(cbir.router)
 app.include_router(provenance.router)
 app.include_router(admin.router)
 app.include_router(relationships.router)
+app.include_router(jobs.router)
 app.include_router(api.router)
 
 

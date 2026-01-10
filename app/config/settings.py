@@ -138,6 +138,9 @@ CELERY_RETRY_BACKOFF_BASE = 2  # Exponential backoff multiplier
 # Result settings
 CELERY_RESULT_EXPIRES = 3600  # 1 hour
 
+# Job monitoring settings
+JOB_RETENTION_DAYS = int(os.getenv("JOB_RETENTION_DAYS", "7"))  # Days to retain job logs
+
 # Redis connection timeouts
 CELERY_REDIS_SOCKET_CONNECT_TIMEOUT = 5
 CELERY_REDIS_SOCKET_TIMEOUT = 5
