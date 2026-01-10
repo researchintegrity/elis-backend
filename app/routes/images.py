@@ -45,7 +45,7 @@ from app.services.panel_extraction_service import (
     get_panels_by_source_image,
     initiate_panel_extraction,
 )
-from app.services.quota_helpers import augment_with_quota
+from app.services.quota_helpers import augment_with_quota, augment_list_with_quota
 from app.services.resource_helpers import get_owned_resource
 from app.tasks.cbir import cbir_index_image, cbir_update_labels, cbir_index_batch_with_progress
 from app.utils.docker_cbir import check_cbir_health
@@ -623,11 +623,9 @@ async def list_images(
             offset=actual_offset
         )
         
-        # Map to response models with quota info
-        responses = []
-        for img in result["images"]:
-            img = augment_with_quota(img, user_id_str, user_quota)
-            responses.append(ImageResponse(**img))
+        # Map to response models with quota info (OPTIMIZED: calculate quota once)
+        augmented_images = augment_list_with_quota(result["images"], user_id_str, user_quota)
+        responses = [ImageResponse(**img) for img in augmented_images]
         
         # Return paginated response with metadata
         total = result["total"]
