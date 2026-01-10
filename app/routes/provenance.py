@@ -42,7 +42,7 @@ class ProvenanceStatusResponse(BaseModel):
 
 
 @router.get("/health", response_model=ProvenanceStatusResponse)
-async def provenance_health():
+def provenance_health():
     """
     Check Provenance service health status.
     """
