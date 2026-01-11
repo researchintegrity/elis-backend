@@ -116,8 +116,46 @@ def list_analyses(
         # Build filter query - always filter by user_id for security
         filter_query = {"user_id": user_id_str}
         
+        # Exclude non-forensic analysis types from the Analysis Dashboard
+        # These belong in the Jobs dashboard or other views
+        EXCLUDED_TYPES = ["cbir_search", "document_extraction", "image_extraction"]
+        
+        # Valid forensic screening tool subtypes (exclude records that don't match these)
+        VALID_SCREENING_SUBTYPES = ["ela", "noise", "gradient", "levelSweep", "cloneDetection", "metadata"]
+        
         if type:
-            filter_query["type"] = type.value
+            # If user explicitly filters by type, validate that it's allowed in this view  
+            if type.value in EXCLUDED_TYPES:  
+                raise HTTPException(  
+                    status_code=status.HTTP_400_BAD_REQUEST,  
+                    detail=f"Analysis type '{type.value}' is not available in this view."  
+                )  
+            filter_query["type"] = type.value  
+            # If filtering by screening_tool, also require valid subtype  
+            if type.value == "screening_tool":  
+                filter_query["parameters.analysis_subtype"] = {"$in": VALID_SCREENING_SUBTYPES}  
+        else:
+            # By default, exclude non-forensic types AND mislabeled screening_tool records
+            # Use $or to include:
+            # 1. All forensic types except screening_tool
+            # 2. screening_tool with valid subtypes only
+            def get_dashboard_type_filter(EXCLUDED_TYPES, VALID_SCREENING_SUBTYPES):
+                """
+                Returns query to match only dashboard-appropriate forensic analyses:
+                1. Include standard forensic types (excluding non-forensic & generic screening tools)
+                2. Include screening tools only if they match valid forensic subtypes
+                """
+                return {
+                    "$or": [
+                        {"type": {"$nin": EXCLUDED_TYPES + ["screening_tool"]}},
+                        {
+                            "type": "screening_tool",
+                            "parameters.analysis_subtype": {"$in": VALID_SCREENING_SUBTYPES}
+                        }
+                    ]
+                }
+
+            filter_query.update(get_dashboard_type_filter(EXCLUDED_TYPES, VALID_SCREENING_SUBTYPES))
         
         if status:
             filter_query["status"] = status.value
