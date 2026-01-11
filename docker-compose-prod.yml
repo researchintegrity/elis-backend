@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # FastAPI Application
   api:
@@ -65,8 +63,10 @@ services:
     networks:
       - elis_network
 
-  # Celery Worker 1
-  worker_1:
+  # Celery Worker (scalable)
+  # Scale workers using: docker-compose up -d --scale worker_1=5
+  # Or modify NUM_WORKERS in .env and restart
+  workers:
     build: .
     environment:
       MONGODB_URL: mongodb://mongo:27017
@@ -88,36 +88,7 @@ services:
     volumes:
       - ${HOST_WORKSPACE_PATH}:${CONTAINER_WORKSPACE_PATH}
       - /var/run/docker.sock:/var/run/docker.sock
-    command: celery -A app.celery_config worker -l info -n worker1@%h -c 1
-    restart: unless-stopped
-    networks:
-      - elis_network
-      - milvus # Connect to CBIR/Milvus network for inter-service communication
-
-  # Celery Worker 2
-  worker_2:
-    build: .
-    environment:
-      MONGODB_URL: mongodb://mongo:27017
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      CONTAINER_WORKSPACE_PATH: ${CONTAINER_WORKSPACE_PATH}
-      HOST_WORKSPACE_PATH: ${HOST_WORKSPACE_PATH}
-      JWT_SECRET: ${JWT_SECRET}
-      TRUFOR_USE_GPU: "false"
-      # CBIR service configuration (use container name when running in Docker)
-      CBIR_SERVICE_HOST: ${CBIR_SERVICE_HOST:-cbir-service}
-      CBIR_SERVICE_PORT: ${CBIR_SERVICE_PORT:-8001}
-      # Provenance service configuration
-      PROVENANCE_SERVICE_HOST: provenance-service
-      PROVENANCE_SERVICE_PORT: ${PROVENANCE_SERVICE_PORT:-8000}
-    depends_on:
-      - redis
-      - mongo
-    volumes:
-      - ${HOST_WORKSPACE_PATH}:${CONTAINER_WORKSPACE_PATH}
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: celery -A app.celery_config worker -l info -n worker2@%h -c 1
+    command: celery -A app.celery_config worker -l info -n worker@%h -c ${WORKER_CONCURRENCY:-1}
     restart: unless-stopped
     networks:
       - elis_network
