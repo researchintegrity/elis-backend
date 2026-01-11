@@ -37,8 +37,8 @@ To get ELIS running on your machine, you will need [Docker Compose](https://docs
 
 #### 1. Clone the repository and submodules
 ```bash
-git clone --recurse-submodules git@github.com:researchintegrity/elis-backend.git
-cd elis-backend
+git clone --recurse-submodules git@github.com:researchintegrity/elis.git
+cd elis
 git submodule update --init --remote # ensure latest submodule versions
 
 ```
@@ -47,7 +47,7 @@ git submodule update --init --remote # ensure latest submodule versions
 ```bash
 cp .env.example .env
 # Edit .env to set the HOST_WORKSPACE_PATH
-# >> HOST_WORKSPACE_PATH=<path/to-current-dir>/elis-backend/system_modules/elis-frontend/workspace
+# >> HOST_WORKSPACE_PATH=<path/to-current-dir>/elis/system_modules/elis-frontend/workspace
 ```
 
 #### 2. Build the tools
