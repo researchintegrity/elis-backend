@@ -35,10 +35,12 @@ Currently, the system is focused on **image forensics**, but future versions wil
 
 To get ELIS running on your machine, you will need [Docker Compose](https://docs.docker.com/compose/) and [Node.js](https://nodejs.org/).
 
-#### 1. Clone the repository
+#### 1. Clone the repository and submodules
 ```bash
-git git clone --recurse-submodules git@github.com:researchintegrity/elis-backend.git
+git clone --recurse-submodules git@github.com:researchintegrity/elis-backend.git
 cd elis-backend
+git submodule update --init --remote # ensure latest submodule versions
+
 ```
 
 #### 1.1 Fix .env
@@ -51,17 +53,17 @@ cp .env.example .env
 #### 2. Build the tools
 This step could take some while as it will download and compile multiple models from different servers
 ```bash
-docker-compose --profile tools build
+docker compose --profile tools build
 ```
 
 #### 3. Launch the backend
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 #### (Production Alternative) 3. Launch the backend with multiple workers (n=5)
 ```bash
-docker-compose -f docker-compose-prod.yml up -d --scale workers=5 
+docker compose -f docker-compose-prod.yml up -d --scale workers=5 
 ```
 
 #### 4. Launch the frontend
