@@ -96,7 +96,15 @@ ELIS integrates multiple specialized modules to detect manipulation.
 | **[Provenance Analysis](https://github.com/researchintegrity/provenance-analysis)** | Tracks reused and manipulated data across articles and datasets. | <div align="center">✅</div> |
 
 
-<!-- TODO: INCLUDE A 30s VIDEO OF EACH THE MODULES WORKING -->
+## TODOs
+
+- [ ] Documentation
+- [ ] UI/UX Improvement (check the [front-end issues](https://github.com/researchintegrity/elis-frontend/issues))
+- [ ] AI-image detection module
+- [ ] AI-text detection module
+- [ ] OpenAlex API linked to ELIS
+
+Found a bug or want a new feature, please contribute by opening a new issue!
 
 ---
 
