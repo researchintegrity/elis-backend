@@ -42,7 +42,7 @@ from app.services.image_service import (
     delete_image_and_artifacts,
     list_images as list_images_service,
 )
-from app.services.job_logger import create_job_log, update_job_progress, complete_job
+from app.services.job_logger import create_job_log, complete_job
 from app.services.panel_extraction_service import (
     get_panel_extraction_status,
     get_panels_by_source_image,
@@ -490,7 +490,7 @@ async def upload_images_batch(
         logger.error(f"Failed to queue batch indexing task: {e}")
         complete_job(main_job_id, user_id_str, JobStatus.FAILED, errors=[f"Failed to queue indexing: {str(e)}"])
         # Update job status to failed
-          # Attempt to roll back uploaded images to avoid orphaned resources
+        # Attempt to roll back uploaded images to avoid orphaned resources
         cleanup_errors = []
         for item in uploaded_images:
             image_id = item.get("image_id")
